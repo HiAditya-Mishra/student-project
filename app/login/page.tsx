@@ -1,20 +1,35 @@
 "use client";
 
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import {
+  GoogleAuthProvider,
+  signInWithRedirect,
+  getRedirectResult,
+} from "firebase/auth";
 import { auth } from "../lib/firebase";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
-  async function login() {
+  const router = useRouter();
+
+  useEffect(() => {
+    getRedirectResult(auth).then((result) => {
+      if (result?.user) {
+        router.replace("/");
+      }
+    });
+  }, [router]);
+
+  function login() {
     const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
-    alert("Logged in successfully");
+    signInWithRedirect(auth, provider);
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center">
+    <main className="min-h-screen flex items-center justify-center bg-gray-100">
       <button
         onClick={login}
-        className="px-6 py-3 bg-blue-600 text-white rounded"
+        className="px-6 py-3 bg-blue-600 text-white rounded-lg"
       >
         Login with Google
       </button>

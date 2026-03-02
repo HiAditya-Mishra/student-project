@@ -1,10 +1,12 @@
+import Link from "next/link";
+
 export default function Navbar() {
   return (
     <nav className="p-4 border-b flex gap-4">
-      <a href="/">Home</a>
-      <a href="/communities">Communities</a>
-      <a href="/vent">Vent</a>
-      <a href="/login">Login</a>
+      <Link href="/">Home</Link>
+      <Link href="/communities">Communities</Link>
+      <Link href="/vent">Vent</Link>
+      <Link href="/login">Login</Link>
     </nav>
   );
 }

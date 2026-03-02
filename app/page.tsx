@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function Home() {
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-gray-100">
@@ -7,19 +9,16 @@ export default function Home() {
       </p>
 
       <div className="mt-6 flex gap-4">
-        <a
-          href="/login"
-          className="px-6 py-2 bg-blue-600 text-white rounded"
-        >
+        <Link href="/login" className="px-6 py-2 bg-blue-600 text-white rounded">
           Login
-        </a>
+        </Link>
 
-        <a
+        <Link
           href="/communities"
           className="px-6 py-2 bg-gray-800 text-white rounded"
         >
           Explore Communities
-        </a>
+        </Link>
       </div>
     </main>
   );
