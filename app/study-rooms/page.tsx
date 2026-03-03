@@ -18,15 +18,29 @@ export default function StudyRoomsPage() {
   const [roomName, setRoomName] = useState("");
   const [topic, setTopic] = useState("");
   const [creating, setCreating] = useState(false);
+  const [roomsError, setRoomsError] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, "studyRooms"), (snapshot) => {
-      const nextRooms: StudyRoom[] = snapshot.docs.map((docSnapshot) => ({
-        id: docSnapshot.id,
-        ...(docSnapshot.data() as Omit<StudyRoom, "id">),
-      }));
-      setRooms(nextRooms);
-    });
+    const unsubscribe = onSnapshot(
+      collection(db, "studyRooms"),
+      (snapshot) => {
+        setRoomsError(null);
+        const nextRooms: StudyRoom[] = snapshot.docs.map((docSnapshot) => ({
+          id: docSnapshot.id,
+          ...(docSnapshot.data() as Omit<StudyRoom, "id">),
+        }));
+        setRooms(nextRooms);
+      },
+      (error) => {
+        console.error(error);
+        setRoomsError(
+          error.code === "permission-denied"
+            ? "Study rooms are blocked by Firestore rules."
+            : "Failed to load study rooms.",
+        );
+        setRooms([]);
+      },
+    );
 
     return () => unsubscribe();
   }, []);
@@ -86,6 +100,12 @@ export default function StudyRoomsPage() {
         <section className="space-y-3">
           <h1 className="text-2xl font-bold text-[#ff8c42]">Study Rooms</h1>
           <p className="text-sm text-gray-400">Real-time rooms for focused sessions and group prep.</p>
+
+          {roomsError ? (
+            <div className="rounded-xl border border-red-600/40 bg-red-950/30 p-3 text-sm text-red-200">
+              {roomsError}
+            </div>
+          ) : null}
 
           <div className="space-y-3">
             {rooms.length ? (

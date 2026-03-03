@@ -40,6 +40,8 @@ export default function FeedPage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [rooms, setRooms] = useState<StudyRoom[]>([]);
   const [sapphire, setSapphire] = useState(0);
+  const [roomsError, setRoomsError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   useEffect(() => {
     let profileUnsubscribe: (() => void) | null = null;
@@ -63,31 +65,53 @@ export default function FeedPage() {
 
       const profileRef = doc(db, "users", user.uid);
       if (profileUnsubscribe) profileUnsubscribe();
-      profileUnsubscribe = onSnapshot(profileRef, (snapshot) => {
-        if (snapshot.exists()) {
-          const data = snapshot.data() as UserProfile;
-          setProfile(data);
-          setPublicMode(data.publicProfile ?? true);
-        } else {
-          setProfile({
-            nickname: user.displayName || "Campus User",
-            skills: [],
-            avatarSeed: user.uid,
-            publicProfile: true,
-          });
-          setPublicMode(true);
-        }
-        setAuthLoading(false);
-      });
+      profileUnsubscribe = onSnapshot(
+        profileRef,
+        (snapshot) => {
+          setProfileError(null);
+          if (snapshot.exists()) {
+            const data = snapshot.data() as UserProfile;
+            setProfile(data);
+            setPublicMode(data.publicProfile ?? true);
+          } else {
+            setProfile({
+              nickname: user.displayName || "Campus User",
+              skills: [],
+              avatarSeed: user.uid,
+              publicProfile: true,
+            });
+            setPublicMode(true);
+          }
+          setAuthLoading(false);
+        },
+        (error) => {
+          console.error(error);
+          setProfileError(
+            error.code === "permission-denied"
+              ? "Profile access is blocked by Firestore rules."
+              : "Could not load profile settings.",
+          );
+          setAuthLoading(false);
+        },
+      );
 
       if (postsUnsubscribe) postsUnsubscribe();
-      postsUnsubscribe = onSnapshot(collection(db, "posts"), (snapshot) => {
-        const totalLikes = snapshot.docs
-          .map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Omit<Post, "id">) }))
-          .filter((post) => post.authorId === user.uid)
-          .reduce((sum, post) => sum + (post.likes ?? 0), 0);
-        setSapphire(totalLikes);
-      });
+      postsUnsubscribe = onSnapshot(
+        collection(db, "posts"),
+        (snapshot) => {
+          const totalLikes = snapshot.docs
+            .map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Omit<Post, "id">) }))
+            .filter((post) => post.authorId === user.uid)
+            .reduce((sum, post) => sum + (post.likes ?? 0), 0);
+          setSapphire(totalLikes);
+        },
+        (error) => {
+          console.error(error);
+          if (error.code === "permission-denied") {
+            setSapphire(0);
+          }
+        },
+      );
     });
 
     return () => {
@@ -98,13 +122,26 @@ export default function FeedPage() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, "studyRooms"), (snapshot) => {
-      const fetchedRooms: StudyRoom[] = snapshot.docs.map((docSnapshot) => ({
-        id: docSnapshot.id,
-        ...(docSnapshot.data() as Omit<StudyRoom, "id">),
-      }));
-      setRooms(fetchedRooms);
-    });
+    const unsubscribe = onSnapshot(
+      collection(db, "studyRooms"),
+      (snapshot) => {
+        setRoomsError(null);
+        const fetchedRooms: StudyRoom[] = snapshot.docs.map((docSnapshot) => ({
+          id: docSnapshot.id,
+          ...(docSnapshot.data() as Omit<StudyRoom, "id">),
+        }));
+        setRooms(fetchedRooms);
+      },
+      (error) => {
+        console.error(error);
+        setRoomsError(
+          error.code === "permission-denied"
+            ? "Study rooms are not accessible with current Firestore rules."
+            : "Failed to load study rooms.",
+        );
+        setRooms([]);
+      },
+    );
 
     return () => unsubscribe();
   }, []);
@@ -155,6 +192,7 @@ export default function FeedPage() {
                 {liveRoom ? "Join" : "Open"}
               </button>
             </div>
+            {roomsError ? <p className="mt-2 text-xs text-red-300">{roomsError}</p> : null}
           </div>
 
           <PostFeed searchTerm={searchTerm} readOnly={readOnlyMode} />
@@ -180,6 +218,7 @@ export default function FeedPage() {
             <p className="text-xs text-gray-400">
               {publicMode ? "Public Profile: full actions enabled" : "Incognito: view-only mode enabled"}
             </p>
+            {profileError ? <p className="mt-2 text-xs text-red-300">{profileError}</p> : null}
           </div>
 
           {readOnlyMode ? (

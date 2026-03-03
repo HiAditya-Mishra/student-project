@@ -70,16 +70,30 @@ export default function CommunitiesPage() {
   const [joined, setJoined] = useState<Record<string, boolean>>({ general: true });
   const [posts, setPosts] = useState<Post[]>([]);
   const [selected, setSelected] = useState<string>("general");
+  const [communityError, setCommunityError] = useState<string | null>(null);
 
   useEffect(() => {
     const postsQuery = query(collection(db, "posts"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(postsQuery, (snapshot) => {
-      const nextPosts: Post[] = snapshot.docs.map((docSnapshot) => ({
-        id: docSnapshot.id,
-        ...(docSnapshot.data() as Omit<Post, "id">),
-      }));
-      setPosts(nextPosts);
-    });
+    const unsubscribe = onSnapshot(
+      postsQuery,
+      (snapshot) => {
+        setCommunityError(null);
+        const nextPosts: Post[] = snapshot.docs.map((docSnapshot) => ({
+          id: docSnapshot.id,
+          ...(docSnapshot.data() as Omit<Post, "id">),
+        }));
+        setPosts(nextPosts);
+      },
+      (error) => {
+        console.error(error);
+        setCommunityError(
+          error.code === "permission-denied"
+            ? "Community data is blocked by Firestore rules."
+            : "Failed to load community posts.",
+        );
+        setPosts([]);
+      },
+    );
 
     return () => unsubscribe();
   }, []);
@@ -113,6 +127,11 @@ export default function CommunitiesPage() {
     <div className="min-h-screen bg-[#0f0f0f] text-white">
       <Navbar />
       <main className="mx-auto grid w-full max-w-7xl gap-6 px-4 py-6 lg:grid-cols-[300px_1fr]">
+        {communityError ? (
+          <div className="lg:col-span-2 rounded-xl border border-red-600/40 bg-red-950/30 p-3 text-sm text-red-200">
+            {communityError}
+          </div>
+        ) : null}
         <aside className="space-y-3 rounded-2xl border border-[#2f2f2f] bg-[#141414] p-4">
           <h2 className="text-lg font-bold text-[#ff8c42]">Discover Communities</h2>
           <p className="text-xs text-gray-400">Choose a community to view top posts, rules, and activity.</p>

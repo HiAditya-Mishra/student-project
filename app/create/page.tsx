@@ -13,16 +13,24 @@ export default function CreatePage() {
   const [user, setUser] = useState<User | null>(null);
   const [canPost, setCanPost] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [profileAccessError, setProfileAccessError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
       setUser(nextUser);
       if (nextUser) {
-        const userSnapshot = await getDoc(doc(db, "users", nextUser.uid));
-        if (userSnapshot.exists()) {
-          const data = userSnapshot.data() as { publicProfile?: boolean };
-          setCanPost(data.publicProfile !== false);
-        } else {
+        try {
+          const userSnapshot = await getDoc(doc(db, "users", nextUser.uid));
+          setProfileAccessError(null);
+          if (userSnapshot.exists()) {
+            const data = userSnapshot.data() as { publicProfile?: boolean };
+            setCanPost(data.publicProfile !== false);
+          } else {
+            setCanPost(true);
+          }
+        } catch (error) {
+          console.error(error);
+          setProfileAccessError("Cannot verify profile visibility due to Firestore permissions.");
           setCanPost(true);
         }
       }
@@ -75,6 +83,11 @@ export default function CreatePage() {
     <div className="min-h-screen bg-[#0f0f0f] text-white">
       <Navbar />
       <div className="mx-auto max-w-2xl p-6">
+        {profileAccessError ? (
+          <div className="mb-4 rounded-xl border border-red-600/40 bg-red-950/30 p-3 text-sm text-red-200">
+            {profileAccessError}
+          </div>
+        ) : null}
         <CreatePost />
       </div>
     </div>
