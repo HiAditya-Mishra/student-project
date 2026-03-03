@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { User, onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 
@@ -16,9 +16,8 @@ const links = [
 export default function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [user, setUser] = useState<User | null>(null);
-  const [searchInput, setSearchInput] = useState(searchParams.get("q") ?? "");
+  const [searchInput, setSearchInput] = useState("");
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, setUser);
@@ -26,8 +25,10 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
-    setSearchInput(searchParams.get("q") ?? "");
-  }, [searchParams]);
+    if (typeof window === "undefined") return;
+    const query = new URLSearchParams(window.location.search).get("q") ?? "";
+    setSearchInput(query);
+  }, [pathname]);
 
   const handleSearch = (event: FormEvent) => {
     event.preventDefault();

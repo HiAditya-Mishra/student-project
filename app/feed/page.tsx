@@ -6,7 +6,7 @@ import CreatePost from "@/components/CreatePost";
 import PostFeed from "@/components/PostFeed";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 
 type UserProfile = {
@@ -34,12 +34,13 @@ function avatarUrl(seed: string) {
 
 export default function FeedPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const pathname = usePathname();
   const [publicMode, setPublicMode] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [rooms, setRooms] = useState<StudyRoom[]>([]);
   const [sapphire, setSapphire] = useState(0);
+  const [searchTerm, setSearchTerm] = useState("");
   const [roomsError, setRoomsError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
 
@@ -122,6 +123,12 @@ export default function FeedPage() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const query = new URLSearchParams(window.location.search).get("q") ?? "";
+    setSearchTerm(query);
+  }, [pathname]);
+
+  useEffect(() => {
     const unsubscribe = onSnapshot(
       collection(db, "studyRooms"),
       (snapshot) => {
@@ -153,7 +160,6 @@ export default function FeedPage() {
   const topSkills = (profile?.skills ?? []).slice(0, 4);
   const liveRoom = rooms.find((room) => (room.participants?.length ?? 0) > 0);
   const readOnlyMode = !publicMode;
-  const searchTerm = searchParams.get("q") ?? "";
 
   const handleToggleVisibility = async () => {
     const user = auth.currentUser;
