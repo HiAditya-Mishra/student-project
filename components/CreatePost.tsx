@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
 type CreatePostProps = {
@@ -31,11 +31,22 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
 
     try {
       setLoading(true);
+      const userRef = doc(db, "users", auth.currentUser.uid);
+      const userSnapshot = await getDoc(userRef);
+      const profile = userSnapshot.exists() ? userSnapshot.data() as { nickname?: string; publicProfile?: boolean } : {};
+
+      if (profile.publicProfile === false) {
+        alert("Switch to Public Profile to create posts.");
+        return;
+      }
+
+      const authorName = profile.nickname?.trim() || auth.currentUser?.displayName || "Aspirant";
+
       await addDoc(collection(db, "posts"), {
         title: title.trim(),
         content: content.trim(),
         community,
-        author: auth.currentUser?.displayName || "Aspirant",
+        author: authorName,
         authorId: auth.currentUser.uid,
         createdAt: serverTimestamp(),
         likes: 0,

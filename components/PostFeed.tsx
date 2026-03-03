@@ -6,6 +6,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   onSnapshot,
   orderBy,
   query,
@@ -36,7 +37,12 @@ function avatarFromName(name: string) {
   return `https://api.dicebear.com/9.x/thumbs/svg?seed=${encodeURIComponent(name)}`;
 }
 
-export default function PostFeed() {
+type PostFeedProps = {
+  searchTerm?: string;
+  readOnly?: boolean;
+};
+
+export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeedProps) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [feedError, setFeedError] = useState<string | null>(null);
   const [updatingPostId, setUpdatingPostId] = useState<string | null>(null);
@@ -81,6 +87,7 @@ export default function PostFeed() {
   }, []);
 
   const handleUpvote = async (postId: string) => {
+    if (readOnly) return;
     const user = auth.currentUser;
     if (!user) {
       alert("Please login to upvote.");
@@ -116,6 +123,7 @@ export default function PostFeed() {
   };
 
   const toggleComments = (postId: string) => {
+    if (readOnly) return;
     const nextOpen = !openComments[postId];
     setOpenComments((prev) => ({ ...prev, [postId]: nextOpen }));
 
@@ -149,6 +157,7 @@ export default function PostFeed() {
   };
 
   const submitComment = async (postId: string) => {
+    if (readOnly) return;
     const user = auth.currentUser;
     if (!user) {
       alert("Please login to comment.");
@@ -163,9 +172,13 @@ export default function PostFeed() {
 
     try {
       setSubmittingCommentPostId(postId);
+      const profileSnapshot = await getDoc(doc(db, "users", user.uid));
+      const nickname = profileSnapshot.exists()
+        ? ((profileSnapshot.data() as { nickname?: string }).nickname ?? "").trim()
+        : "";
       await addDoc(collection(db, "posts", postId, "comments"), {
         content,
-        author: user.displayName || "Aspirant",
+        author: nickname || user.displayName || "Aspirant",
         authorId: user.uid,
         createdAt: serverTimestamp(),
       });
@@ -180,6 +193,7 @@ export default function PostFeed() {
   };
 
   const handleDeletePost = async (post: Post) => {
+    if (readOnly) return;
     const user = auth.currentUser;
     if (!user) {
       alert("Please login to delete posts.");
@@ -207,6 +221,7 @@ export default function PostFeed() {
   };
 
   const handleShare = async (postId: string) => {
+    if (readOnly) return;
     const url = `${window.location.origin}/feed?post=${postId}`;
     try {
       if (navigator.share) {
@@ -226,6 +241,17 @@ export default function PostFeed() {
     }
   };
 
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const visiblePosts = posts.filter((post) => {
+    if (!normalizedSearch) return true;
+    return (
+      post.title?.toLowerCase().includes(normalizedSearch) ||
+      post.content?.toLowerCase().includes(normalizedSearch) ||
+      post.author?.toLowerCase().includes(normalizedSearch) ||
+      post.community?.toLowerCase().includes(normalizedSearch)
+    );
+  });
+
   return (
     <div className="space-y-3">
       {feedError ? (
@@ -235,7 +261,7 @@ export default function PostFeed() {
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
-      {posts.map((post) => (
+      {visiblePosts.map((post) => (
         <article
           key={post.id}
           className="rounded-2xl border border-[#ff6a00] bg-[#141414] p-4 shadow-[0_0_14px_rgba(255,106,0,0.2)]"
@@ -248,7 +274,7 @@ export default function PostFeed() {
             />
             <div>
               <p className="text-sm font-semibold text-[#ff8c42]">{post.author || "Aspirant"}</p>
-              <p className="text-xs text-gray-500">r/{post.community || "general"}</p>
+              <p className="text-xs text-gray-500">{post.community || "general"}</p>
             </div>
           </div>
 
@@ -258,7 +284,11 @@ export default function PostFeed() {
           <div className="mt-4 flex items-center gap-3 text-xs text-gray-300">
             <button
               onClick={() => void handleUpvote(post.id)}
-              disabled={updatingPostId === post.id || (post.likedBy ?? []).includes(auth.currentUser?.uid ?? "")}
+              disabled={
+                readOnly ||
+                updatingPostId === post.id ||
+                (post.likedBy ?? []).includes(auth.currentUser?.uid ?? "")
+              }
               className="rounded-lg bg-[#ff6a00] px-3 py-1 font-semibold text-white transition hover:bg-[#ff8c42] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {(post.likedBy ?? []).includes(auth.currentUser?.uid ?? "")
@@ -267,17 +297,19 @@ export default function PostFeed() {
             </button>
             <button
               onClick={() => toggleComments(post.id)}
+              disabled={readOnly}
               className="rounded-lg border border-[#2f2f2f] px-3 py-1 hover:border-[#ff6a00]"
             >
               Comment {commentsByPost[post.id]?.length ? `(${commentsByPost[post.id].length})` : ""}
             </button>
             <button
               onClick={() => void handleShare(post.id)}
+              disabled={readOnly}
               className="rounded-lg border border-[#2f2f2f] px-3 py-1 hover:border-[#ff6a00]"
             >
               Share
             </button>
-            {(post.authorId === auth.currentUser?.uid ||
+            {!readOnly && (post.authorId === auth.currentUser?.uid ||
               (post.authorId == null && post.author === auth.currentUser?.displayName)) ? (
               <button
                 onClick={() => void handleDeletePost(post)}
@@ -289,7 +321,7 @@ export default function PostFeed() {
             ) : null}
           </div>
 
-          {openComments[post.id] ? (
+          {!readOnly && openComments[post.id] ? (
             <div className="mt-4 space-y-3 rounded-xl border border-[#2a2a2a] bg-[#0f0f0f] p-3">
               <div className="space-y-2">
                 {(commentsByPost[post.id] ?? []).length ? (
@@ -326,6 +358,11 @@ export default function PostFeed() {
         </article>
       ))}
       </div>
+      {!feedError && !visiblePosts.length ? (
+        <p className="rounded-xl border border-[#2b2b2b] bg-[#121212] p-3 text-sm text-gray-400">
+          No posts found for "{searchTerm}".
+        </p>
+      ) : null}
     </div>
   );
 }

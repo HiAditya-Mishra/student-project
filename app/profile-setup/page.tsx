@@ -34,8 +34,6 @@ export default function ProfileSetupPage() {
           interests: interests.trim(),
           bio: "",
           skills: [],
-          branch: "",
-          year: "",
           avatarSeed: user.uid,
           publicProfile: true,
           linkedin: "",

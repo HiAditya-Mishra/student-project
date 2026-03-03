@@ -13,8 +13,6 @@ type UserProfile = {
   hobbies: string;
   interests: string;
   skills: string[];
-  branch: string;
-  year: string;
   avatarSeed: string;
   publicProfile: boolean;
   linkedin: string;
@@ -27,8 +25,6 @@ const defaultProfile: UserProfile = {
   hobbies: "",
   interests: "",
   skills: [],
-  branch: "",
-  year: "",
   avatarSeed: "",
   publicProfile: true,
   linkedin: "",
@@ -112,8 +108,6 @@ export default function ProfilePage() {
           bio: profile.bio.trim(),
           hobbies: profile.hobbies.trim(),
           interests: profile.interests.trim(),
-          branch: profile.branch.trim(),
-          year: profile.year.trim(),
           avatarSeed: profile.avatarSeed.trim() || user.uid,
           linkedin: profile.linkedin.trim(),
           github: profile.github.trim(),
@@ -164,23 +158,6 @@ export default function ProfilePage() {
               />
             </label>
 
-            <label className="space-y-1">
-              <span className="text-xs text-gray-400">Branch / Program</span>
-              <input
-                value={profile.branch}
-                onChange={(e) => updateField("branch", e.target.value)}
-                className="w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
-              />
-            </label>
-
-            <label className="space-y-1">
-              <span className="text-xs text-gray-400">Year / Semester</span>
-              <input
-                value={profile.year}
-                onChange={(e) => updateField("year", e.target.value)}
-                className="w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
-              />
-            </label>
           </div>
 
           <label className="space-y-1">
@@ -271,7 +248,6 @@ export default function ProfilePage() {
           <p className="text-xs uppercase tracking-wide text-gray-400">Live Preview</p>
           <img src={avatarPreview} alt={profile.nickname || "Avatar"} className="h-20 w-20 rounded-full border border-[#ff8c42]" />
           <h3 className="text-xl font-semibold">{profile.nickname || "Campus User"}</h3>
-          <p className="text-xs text-gray-400">{profile.branch || "Branch not set"} {profile.year ? `| ${profile.year}` : ""}</p>
           <p className="text-sm text-gray-300">{profile.bio || "Your bio will appear here."}</p>
           <div className="flex flex-wrap gap-2">
             {(skillsInput.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 10)).map((skill) => (

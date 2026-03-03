@@ -5,8 +5,8 @@ import Navbar from "@/components/navbar";
 import CreatePost from "@/components/CreatePost";
 import PostFeed from "@/components/PostFeed";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
-import { useRouter } from "next/navigation";
+import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
+import { useRouter, useSearchParams } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 
 type UserProfile = {
@@ -14,7 +14,18 @@ type UserProfile = {
   skills?: string[];
   avatarSeed?: string;
   publicProfile?: boolean;
-  bio?: string;
+};
+
+type StudyRoom = {
+  id: string;
+  name?: string;
+  participants?: string[];
+};
+
+type Post = {
+  id: string;
+  authorId?: string;
+  likes?: number;
 };
 
 function avatarUrl(seed: string) {
@@ -23,27 +34,35 @@ function avatarUrl(seed: string) {
 
 export default function FeedPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [publicMode, setPublicMode] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [rooms, setRooms] = useState<StudyRoom[]>([]);
+  const [sapphire, setSapphire] = useState(0);
 
   useEffect(() => {
     let profileUnsubscribe: (() => void) | null = null;
+    let postsUnsubscribe: (() => void) | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
         if (profileUnsubscribe) {
           profileUnsubscribe();
           profileUnsubscribe = null;
         }
+        if (postsUnsubscribe) {
+          postsUnsubscribe();
+          postsUnsubscribe = null;
+        }
         setProfile(null);
+        setSapphire(0);
         setAuthLoading(false);
         return;
       }
 
       const profileRef = doc(db, "users", user.uid);
-      if (profileUnsubscribe) {
-        profileUnsubscribe();
-      }
+      if (profileUnsubscribe) profileUnsubscribe();
       profileUnsubscribe = onSnapshot(profileRef, (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data() as UserProfile;
@@ -60,14 +79,34 @@ export default function FeedPage() {
         }
         setAuthLoading(false);
       });
+
+      if (postsUnsubscribe) postsUnsubscribe();
+      postsUnsubscribe = onSnapshot(collection(db, "posts"), (snapshot) => {
+        const totalLikes = snapshot.docs
+          .map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Omit<Post, "id">) }))
+          .filter((post) => post.authorId === user.uid)
+          .reduce((sum, post) => sum + (post.likes ?? 0), 0);
+        setSapphire(totalLikes);
+      });
     });
 
     return () => {
-      if (profileUnsubscribe) {
-        profileUnsubscribe();
-      }
+      if (profileUnsubscribe) profileUnsubscribe();
+      if (postsUnsubscribe) postsUnsubscribe();
       unsubscribe();
     };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "studyRooms"), (snapshot) => {
+      const fetchedRooms: StudyRoom[] = snapshot.docs.map((docSnapshot) => ({
+        id: docSnapshot.id,
+        ...(docSnapshot.data() as Omit<StudyRoom, "id">),
+      }));
+      setRooms(fetchedRooms);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const displayName = useMemo(() => {
@@ -75,6 +114,9 @@ export default function FeedPage() {
   }, [profile?.nickname]);
 
   const topSkills = (profile?.skills ?? []).slice(0, 4);
+  const liveRoom = rooms.find((room) => (room.participants?.length ?? 0) > 0);
+  const readOnlyMode = !publicMode;
+  const searchTerm = searchParams.get("q") ?? "";
 
   const handleToggleVisibility = async () => {
     const user = auth.currentUser;
@@ -99,16 +141,23 @@ export default function FeedPage() {
       <main className="mx-auto grid w-full max-w-7xl gap-6 px-4 py-6 lg:grid-cols-[1fr_320px]">
         <section className="space-y-5">
           <div className="rounded-2xl border border-[#2b2b2b] bg-[#121212] p-4">
-            <p className="text-sm font-semibold text-[#ff8c42]">Live Study Session</p>
+            <p className="text-sm font-semibold text-[#ff8c42]">Live Study Rooms</p>
             <div className="mt-2 flex items-center justify-between rounded-xl border border-[#ff6a00] bg-[#191919] px-3 py-2">
-              <p className="text-sm text-gray-300">General Room - 27 members active</p>
-              <button className="rounded-lg bg-[#ff6a00] px-3 py-1 text-sm font-semibold">
-                Join
+              <p className="text-sm text-gray-300">
+                {liveRoom
+                  ? `${liveRoom.name || "Untitled Room"} | ${liveRoom.participants?.length ?? 0} active`
+                  : "No live room right now"}
+              </p>
+              <button
+                onClick={() => router.push("/study-rooms")}
+                className="rounded-lg bg-[#ff6a00] px-3 py-1 text-sm font-semibold"
+              >
+                {liveRoom ? "Join" : "Open"}
               </button>
             </div>
           </div>
 
-          <PostFeed />
+          <PostFeed searchTerm={searchTerm} readOnly={readOnlyMode} />
         </section>
 
         <aside className="space-y-4">
@@ -129,11 +178,17 @@ export default function FeedPage() {
               </button>
             </div>
             <p className="text-xs text-gray-400">
-              {publicMode ? "Public Profile" : "Incognito Mode"}
+              {publicMode ? "Public Profile: full actions enabled" : "Incognito: view-only mode enabled"}
             </p>
           </div>
 
-          <CreatePost mode="compact" />
+          {readOnlyMode ? (
+            <div className="rounded-2xl border border-[#2d2d2d] bg-[#141414] p-4 text-sm text-gray-300">
+              Posting is disabled in incognito mode. Switch to Public Profile to create or interact with posts.
+            </div>
+          ) : (
+            <CreatePost mode="compact" />
+          )}
 
           <div className="rounded-2xl border border-[#2f2f2f] bg-[#141414] p-4">
             <img
@@ -161,17 +216,10 @@ export default function FeedPage() {
               </div>
             </div>
 
-            <div className="mt-4">
-              <div className="mb-1 flex items-center justify-between text-xs text-gray-400">
-                <span>Helpfulness Level</span>
-                <span>{Math.max(10, (topSkills.length * 7.5 + 10)).toFixed(1)}</span>
-              </div>
-              <div className="h-2 rounded-full bg-[#2f2f2f]">
-                <div
-                  className="h-2 rounded-full bg-[#ff6a00]"
-                  style={{ width: `${Math.min(95, 35 + topSkills.length * 12)}%` }}
-                />
-              </div>
+            <div className="mt-4 rounded-xl border border-[#2d2d2d] bg-[#101010] p-3">
+              <p className="text-xs text-gray-400">Sapphire</p>
+              <p className="mt-1 text-2xl font-bold text-[#5bc0ff]">{sapphire}</p>
+              <p className="mt-1 text-xs text-gray-500">Earn Sapphire from likes on your posts.</p>
             </div>
 
             <button

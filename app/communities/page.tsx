@@ -11,8 +11,6 @@ type Community = {
   summary: string;
   rules: string[];
   tags: string[];
-  activeNow: number;
-  members: number;
 };
 
 type Post = {
@@ -20,62 +18,51 @@ type Post = {
   title: string;
   community: string;
   likes: number;
+  authorId?: string;
 };
 
 const communityCatalog: Community[] = [
   {
     id: "general",
-    name: "r/general",
+    name: "General",
     summary: "Open forum for campus life, announcements, and questions.",
     rules: ["Be respectful", "No spam", "Use clear titles"],
     tags: ["Campus", "Announcements"],
-    activeNow: 62,
-    members: 1432,
   },
   {
     id: "coding",
-    name: "r/coding",
+    name: "Coding",
     summary: "Debug help, hackathon prep, projects, and internship tips.",
     rules: ["Share context in questions", "No plagiarism", "Use code blocks"],
     tags: ["Programming", "Hackathons"],
-    activeNow: 48,
-    members: 1204,
   },
   {
     id: "study",
-    name: "r/study",
+    name: "Study",
     summary: "Daily accountability, exam prep, and study-room coordination.",
     rules: ["No cheating discussions", "Stay on-topic", "Encourage others"],
     tags: ["Productivity", "Exams"],
-    activeNow: 57,
-    members: 1108,
   },
   {
     id: "college-life",
-    name: "r/college-life",
+    name: "College Life",
     summary: "Hostel, clubs, events, and day-to-day college experiences.",
     rules: ["No harassment", "No doxxing", "Keep it student-safe"],
     tags: ["Campus Life", "Events"],
-    activeNow: 33,
-    members: 978,
   },
   {
     id: "startups",
-    name: "r/startups",
+    name: "Startups",
     summary: "Build-in-public, founder journeys, and startup resources.",
     rules: ["No fake promises", "Transparent promotion only", "Constructive feedback"],
     tags: ["Founders", "Career"],
-    activeNow: 25,
-    members: 654,
   },
   {
     id: "mental-health",
-    name: "r/mental-health",
+    name: "Mental Health",
     summary: "Supportive peer space for stress, burnout, and wellbeing.",
     rules: ["No judgement", "No hate speech", "Emergency: contact local helpline"],
     tags: ["Wellbeing", "Peer Support"],
-    activeNow: 21,
-    members: 540,
   },
 ];
 
@@ -110,11 +97,16 @@ export default function CommunitiesPage() {
   }, [posts, selectedCommunity.id]);
 
   const statsByCommunity = useMemo(() => {
-    const counts: Record<string, number> = {};
+    const stats: Record<string, { posts: number; likes: number; creators: Set<string> }> = {};
     posts.forEach((post) => {
-      counts[post.community] = (counts[post.community] ?? 0) + 1;
+      if (!stats[post.community]) {
+        stats[post.community] = { posts: 0, likes: 0, creators: new Set<string>() };
+      }
+      stats[post.community].posts += 1;
+      stats[post.community].likes += post.likes ?? 0;
+      if (post.authorId) stats[post.community].creators.add(post.authorId);
     });
-    return counts;
+    return stats;
   }, [posts]);
 
   return (
@@ -138,7 +130,7 @@ export default function CommunitiesPage() {
               >
                 <p className="text-sm font-semibold">{community.name}</p>
                 <p className="mt-1 text-xs text-gray-400">
-                  {community.activeNow} active | {community.members.toLocaleString()} members
+                  {statsByCommunity[community.id]?.posts ?? 0} posts | {statsByCommunity[community.id]?.likes ?? 0} likes
                 </p>
               </button>
             ))}
@@ -176,16 +168,16 @@ export default function CommunitiesPage() {
 
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               <div className="rounded-xl border border-[#2d2d2d] bg-[#101010] p-3">
-                <p className="text-xs text-gray-400">Members</p>
-                <p className="mt-1 text-xl font-bold">{selectedCommunity.members.toLocaleString()}</p>
+                <p className="text-xs text-gray-400">Post Creators</p>
+                <p className="mt-1 text-xl font-bold">{statsByCommunity[selectedCommunity.id]?.creators.size ?? 0}</p>
               </div>
               <div className="rounded-xl border border-[#2d2d2d] bg-[#101010] p-3">
-                <p className="text-xs text-gray-400">Active Now</p>
-                <p className="mt-1 text-xl font-bold">{selectedCommunity.activeNow}</p>
+                <p className="text-xs text-gray-400">Total Likes</p>
+                <p className="mt-1 text-xl font-bold">{statsByCommunity[selectedCommunity.id]?.likes ?? 0}</p>
               </div>
               <div className="rounded-xl border border-[#2d2d2d] bg-[#101010] p-3">
                 <p className="text-xs text-gray-400">Posts in Feed</p>
-                <p className="mt-1 text-xl font-bold">{statsByCommunity[selectedCommunity.id] ?? 0}</p>
+                <p className="mt-1 text-xl font-bold">{statsByCommunity[selectedCommunity.id]?.posts ?? 0}</p>
               </div>
             </div>
           </div>
