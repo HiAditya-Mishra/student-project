@@ -36,6 +36,7 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
         content: content.trim(),
         community,
         author: auth.currentUser?.displayName || "Aspirant",
+        authorId: auth.currentUser.uid,
         createdAt: serverTimestamp(),
         likes: 0,
         likedBy: [],
@@ -91,8 +92,11 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
             className="flex-1 rounded-xl border border-[#313131] bg-[#0f0f0f] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
           >
             <option value="general">General</option>
-            <option value="study">Study</option>
-            <option value="tech">Tech</option>
+            <option value="coding">Coding & Tech</option>
+            <option value="study">Study Rooms</option>
+            <option value="college-life">College Life</option>
+            <option value="startups">Startups</option>
+            <option value="mental-health">Mental Health</option>
           </select>
 
           <button

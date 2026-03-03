@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  addDoc,
   collection,
+  deleteDoc,
   doc,
   onSnapshot,
   orderBy,
   query,
   runTransaction,
+  serverTimestamp,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
@@ -17,8 +20,16 @@ interface Post {
   content: string;
   community: string;
   author: string;
+  authorId?: string;
   likes: number;
   likedBy?: string[];
+}
+
+interface Comment {
+  id: string;
+  content: string;
+  author: string;
+  authorId?: string;
 }
 
 function avatarFromName(name: string) {
@@ -29,6 +40,12 @@ export default function PostFeed() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [feedError, setFeedError] = useState<string | null>(null);
   const [updatingPostId, setUpdatingPostId] = useState<string | null>(null);
+  const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
+  const [openComments, setOpenComments] = useState<Record<string, boolean>>({});
+  const [commentsByPost, setCommentsByPost] = useState<Record<string, Comment[]>>({});
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [submittingCommentPostId, setSubmittingCommentPostId] = useState<string | null>(null);
+  const commentListeners = useRef<Record<string, () => void>>({});
 
   useEffect(() => {
     const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
@@ -54,6 +71,13 @@ export default function PostFeed() {
     );
 
     return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      Object.values(commentListeners.current).forEach((unsubscribe) => unsubscribe());
+      commentListeners.current = {};
+    };
   }, []);
 
   const handleUpvote = async (postId: string) => {
@@ -88,6 +112,117 @@ export default function PostFeed() {
       alert(message);
     } finally {
       setUpdatingPostId(null);
+    }
+  };
+
+  const toggleComments = (postId: string) => {
+    const nextOpen = !openComments[postId];
+    setOpenComments((prev) => ({ ...prev, [postId]: nextOpen }));
+
+    if (!nextOpen) {
+      if (commentListeners.current[postId]) {
+        commentListeners.current[postId]();
+        delete commentListeners.current[postId];
+      }
+      return;
+    }
+
+    if (commentListeners.current[postId]) return;
+
+    const commentsQuery = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "asc"));
+    const unsubscribe = onSnapshot(
+      commentsQuery,
+      (snapshot) => {
+        const comments: Comment[] = snapshot.docs.map((commentSnapshot) => ({
+          id: commentSnapshot.id,
+          ...(commentSnapshot.data() as Omit<Comment, "id">),
+        }));
+        setCommentsByPost((prev) => ({ ...prev, [postId]: comments }));
+      },
+      (error) => {
+        console.error(error);
+        alert("Failed to load comments.");
+      },
+    );
+
+    commentListeners.current[postId] = unsubscribe;
+  };
+
+  const submitComment = async (postId: string) => {
+    const user = auth.currentUser;
+    if (!user) {
+      alert("Please login to comment.");
+      return;
+    }
+
+    const content = (commentDrafts[postId] ?? "").trim();
+    if (!content) {
+      alert("Write a comment first.");
+      return;
+    }
+
+    try {
+      setSubmittingCommentPostId(postId);
+      await addDoc(collection(db, "posts", postId, "comments"), {
+        content,
+        author: user.displayName || "Aspirant",
+        authorId: user.uid,
+        createdAt: serverTimestamp(),
+      });
+
+      setCommentDrafts((prev) => ({ ...prev, [postId]: "" }));
+    } catch (error) {
+      console.error(error);
+      alert("Unable to add comment right now.");
+    } finally {
+      setSubmittingCommentPostId(null);
+    }
+  };
+
+  const handleDeletePost = async (post: Post) => {
+    const user = auth.currentUser;
+    if (!user) {
+      alert("Please login to delete posts.");
+      return;
+    }
+
+    const isOwner = post.authorId === user.uid || (post.authorId == null && post.author === user.displayName);
+    if (!isOwner) {
+      alert("You can delete only your own posts.");
+      return;
+    }
+
+    const confirmed = window.confirm("Delete this post? This cannot be undone.");
+    if (!confirmed) return;
+
+    try {
+      setDeletingPostId(post.id);
+      await deleteDoc(doc(db, "posts", post.id));
+    } catch (error) {
+      console.error(error);
+      alert("Unable to delete post right now.");
+    } finally {
+      setDeletingPostId(null);
+    }
+  };
+
+  const handleShare = async (postId: string) => {
+    const url = `${window.location.origin}/feed?post=${postId}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: "CampusSphere post",
+          text: "Check this post on CampusSphere",
+          url,
+        });
+        return;
+      }
+
+      await navigator.clipboard.writeText(url);
+      alert("Post link copied.");
+    } catch (error) {
+      console.error(error);
+      alert("Could not share this post.");
     }
   };
 
@@ -130,13 +265,64 @@ export default function PostFeed() {
                 ? `Upvoted ${post.likes ?? 0}`
                 : `Upvote ${post.likes ?? 0}`}
             </button>
-            <button className="rounded-lg border border-[#2f2f2f] px-3 py-1 hover:border-[#ff6a00]">
-              Comment
+            <button
+              onClick={() => toggleComments(post.id)}
+              className="rounded-lg border border-[#2f2f2f] px-3 py-1 hover:border-[#ff6a00]"
+            >
+              Comment {commentsByPost[post.id]?.length ? `(${commentsByPost[post.id].length})` : ""}
             </button>
-            <button className="rounded-lg border border-[#2f2f2f] px-3 py-1 hover:border-[#ff6a00]">
+            <button
+              onClick={() => void handleShare(post.id)}
+              className="rounded-lg border border-[#2f2f2f] px-3 py-1 hover:border-[#ff6a00]"
+            >
               Share
             </button>
+            {(post.authorId === auth.currentUser?.uid ||
+              (post.authorId == null && post.author === auth.currentUser?.displayName)) ? (
+              <button
+                onClick={() => void handleDeletePost(post)}
+                disabled={deletingPostId === post.id}
+                className="rounded-lg border border-red-800/60 px-3 py-1 text-red-300 hover:border-red-500 disabled:opacity-60"
+              >
+                {deletingPostId === post.id ? "Deleting..." : "Delete"}
+              </button>
+            ) : null}
           </div>
+
+          {openComments[post.id] ? (
+            <div className="mt-4 space-y-3 rounded-xl border border-[#2a2a2a] bg-[#0f0f0f] p-3">
+              <div className="space-y-2">
+                {(commentsByPost[post.id] ?? []).length ? (
+                  commentsByPost[post.id].map((comment) => (
+                    <div key={comment.id} className="rounded-lg border border-[#222] bg-[#121212] px-3 py-2">
+                      <p className="text-xs font-semibold text-[#ff8c42]">{comment.author || "Aspirant"}</p>
+                      <p className="mt-1 text-sm text-gray-300">{comment.content}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-gray-500">No comments yet.</p>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  value={commentDrafts[post.id] ?? ""}
+                  onChange={(e) =>
+                    setCommentDrafts((prev) => ({ ...prev, [post.id]: e.target.value }))
+                  }
+                  placeholder="Write a comment..."
+                  className="flex-1 rounded-lg border border-[#2f2f2f] bg-[#141414] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+                />
+                <button
+                  onClick={() => void submitComment(post.id)}
+                  disabled={submittingCommentPostId === post.id}
+                  className="rounded-lg bg-[#ff6a00] px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  {submittingCommentPostId === post.id ? "Posting..." : "Post"}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </article>
       ))}
       </div>

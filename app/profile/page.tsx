@@ -1,0 +1,287 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
+import Navbar from "@/components/navbar";
+
+type UserProfile = {
+  nickname: string;
+  bio: string;
+  hobbies: string;
+  interests: string;
+  skills: string[];
+  branch: string;
+  year: string;
+  avatarSeed: string;
+  publicProfile: boolean;
+  linkedin: string;
+  github: string;
+};
+
+const defaultProfile: UserProfile = {
+  nickname: "",
+  bio: "",
+  hobbies: "",
+  interests: "",
+  skills: [],
+  branch: "",
+  year: "",
+  avatarSeed: "",
+  publicProfile: true,
+  linkedin: "",
+  github: "",
+};
+
+function avatarUrl(seed: string) {
+  return `https://api.dicebear.com/9.x/thumbs/svg?seed=${encodeURIComponent(seed || "campus-user")}`;
+}
+
+export default function ProfilePage() {
+  const [profile, setProfile] = useState<UserProfile>(defaultProfile);
+  const [skillsInput, setSkillsInput] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const router = useRouter();
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        router.push("/");
+        return;
+      }
+
+      const userRef = doc(db, "users", user.uid);
+      const snapshot = await getDoc(userRef);
+      if (snapshot.exists()) {
+        const data = snapshot.data() as Partial<UserProfile>;
+        const nextProfile: UserProfile = {
+          ...defaultProfile,
+          ...data,
+          nickname: data.nickname || user.displayName || "",
+          avatarSeed: data.avatarSeed || user.uid,
+          skills: Array.isArray(data.skills) ? data.skills : [],
+        };
+        setProfile(nextProfile);
+        setSkillsInput(nextProfile.skills.join(", "));
+      } else {
+        const starter = {
+          ...defaultProfile,
+          nickname: user.displayName || "",
+          avatarSeed: user.uid,
+        };
+        setProfile(starter);
+        setSkillsInput("");
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [router]);
+
+  const avatarPreview = useMemo(() => avatarUrl(profile.avatarSeed), [profile.avatarSeed]);
+
+  const updateField = <K extends keyof UserProfile>(field: K, value: UserProfile[K]) => {
+    setProfile((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSave = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const parsedSkills = skillsInput
+      .split(",")
+      .map((skill) => skill.trim())
+      .filter(Boolean)
+      .slice(0, 10);
+
+    if (!profile.nickname.trim()) {
+      alert("Nickname is required.");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await setDoc(
+        doc(db, "users", user.uid),
+        {
+          ...profile,
+          nickname: profile.nickname.trim(),
+          bio: profile.bio.trim(),
+          hobbies: profile.hobbies.trim(),
+          interests: profile.interests.trim(),
+          branch: profile.branch.trim(),
+          year: profile.year.trim(),
+          avatarSeed: profile.avatarSeed.trim() || user.uid,
+          linkedin: profile.linkedin.trim(),
+          github: profile.github.trim(),
+          skills: parsedSkills,
+          email: user.email ?? "",
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+      setProfile((prev) => ({ ...prev, skills: parsedSkills }));
+      setSkillsInput(parsedSkills.join(", "));
+      alert("Profile saved.");
+    } catch (error) {
+      console.error(error);
+      alert("Failed to save profile.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="min-h-screen bg-[#0f0f0f] p-8 text-center text-gray-400">Loading profile...</div>;
+  }
+
+  return (
+    <div className="min-h-screen bg-[#0f0f0f] text-white">
+      <Navbar />
+      <main className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-6 lg:grid-cols-[1fr_320px]">
+        <section className="space-y-4 rounded-2xl border border-[#2d2d2d] bg-[#141414] p-5">
+          <h1 className="text-2xl font-bold text-[#ff8c42]">Profile Customization</h1>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="space-y-1">
+              <span className="text-xs text-gray-400">Nickname</span>
+              <input
+                value={profile.nickname}
+                onChange={(e) => updateField("nickname", e.target.value)}
+                className="w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+              />
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs text-gray-400">Avatar Seed</span>
+              <input
+                value={profile.avatarSeed}
+                onChange={(e) => updateField("avatarSeed", e.target.value)}
+                className="w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+              />
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs text-gray-400">Branch / Program</span>
+              <input
+                value={profile.branch}
+                onChange={(e) => updateField("branch", e.target.value)}
+                className="w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+              />
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs text-gray-400">Year / Semester</span>
+              <input
+                value={profile.year}
+                onChange={(e) => updateField("year", e.target.value)}
+                className="w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+              />
+            </label>
+          </div>
+
+          <label className="space-y-1">
+            <span className="text-xs text-gray-400">Bio</span>
+            <textarea
+              value={profile.bio}
+              onChange={(e) => updateField("bio", e.target.value)}
+              className="min-h-24 w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+            />
+          </label>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="space-y-1">
+              <span className="text-xs text-gray-400">Hobbies</span>
+              <input
+                value={profile.hobbies}
+                onChange={(e) => updateField("hobbies", e.target.value)}
+                className="w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+              />
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs text-gray-400">Interests</span>
+              <input
+                value={profile.interests}
+                onChange={(e) => updateField("interests", e.target.value)}
+                className="w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+              />
+            </label>
+          </div>
+
+          <label className="space-y-1">
+            <span className="text-xs text-gray-400">Skills (comma-separated)</span>
+            <input
+              value={skillsInput}
+              onChange={(e) => setSkillsInput(e.target.value)}
+              placeholder="React, DSA, UI/UX"
+              className="w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+            />
+          </label>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="space-y-1">
+              <span className="text-xs text-gray-400">LinkedIn URL</span>
+              <input
+                value={profile.linkedin}
+                onChange={(e) => updateField("linkedin", e.target.value)}
+                className="w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+              />
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs text-gray-400">GitHub URL</span>
+              <input
+                value={profile.github}
+                onChange={(e) => updateField("github", e.target.value)}
+                className="w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+              />
+            </label>
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border border-[#2d2d2d] bg-[#111111] px-3 py-2">
+            <p className="text-sm text-gray-300">Public profile visible in feed</p>
+            <button
+              onClick={() => updateField("publicProfile", !profile.publicProfile)}
+              className={`h-6 w-11 rounded-full p-1 transition ${
+                profile.publicProfile ? "bg-[#ff6a00]" : "bg-[#333333]"
+              }`}
+            >
+              <span
+                className={`block h-4 w-4 rounded-full bg-white transition ${
+                  profile.publicProfile ? "translate-x-5" : ""
+                }`}
+              />
+            </button>
+          </div>
+
+          <button
+            onClick={() => void handleSave()}
+            disabled={saving}
+            className="rounded-xl bg-[#ff6a00] px-5 py-2 text-sm font-semibold text-white hover:bg-[#ff8c42] disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save Profile"}
+          </button>
+        </section>
+
+        <aside className="space-y-3 rounded-2xl border border-[#2d2d2d] bg-[#141414] p-4">
+          <p className="text-xs uppercase tracking-wide text-gray-400">Live Preview</p>
+          <img src={avatarPreview} alt={profile.nickname || "Avatar"} className="h-20 w-20 rounded-full border border-[#ff8c42]" />
+          <h3 className="text-xl font-semibold">{profile.nickname || "Campus User"}</h3>
+          <p className="text-xs text-gray-400">{profile.branch || "Branch not set"} {profile.year ? `| ${profile.year}` : ""}</p>
+          <p className="text-sm text-gray-300">{profile.bio || "Your bio will appear here."}</p>
+          <div className="flex flex-wrap gap-2">
+            {(skillsInput.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 10)).map((skill) => (
+              <span key={skill} className="rounded-md bg-[#2a1b12] px-2 py-1 text-xs text-[#ff8c42]">
+                #{skill}
+              </span>
+            ))}
+          </div>
+        </aside>
+      </main>
+    </div>
+  );
+}

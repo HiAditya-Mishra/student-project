@@ -9,7 +9,7 @@ const links = [
   { label: "Feed", href: "/feed" },
   { label: "Communities", href: "/communities" },
   { label: "Study Rooms", href: "/vent" },
-  { label: "Profile", href: "/profile-setup" },
+  { label: "Profile", href: "/profile" },
 ];
 
 export default function Navbar() {

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
 export default function ProfileSetupPage() {
@@ -26,12 +26,26 @@ export default function ProfileSetupPage() {
 
     try {
       setSaving(true);
-      await setDoc(doc(db, "users", user.uid), {
-        nickname: nickname.trim(),
-        hobbies: hobbies.trim(),
-        interests: interests.trim(),
-        email: user.email ?? "",
-      });
+      await setDoc(
+        doc(db, "users", user.uid),
+        {
+          nickname: nickname.trim(),
+          hobbies: hobbies.trim(),
+          interests: interests.trim(),
+          bio: "",
+          skills: [],
+          branch: "",
+          year: "",
+          avatarSeed: user.uid,
+          publicProfile: true,
+          linkedin: "",
+          github: "",
+          email: user.email ?? "",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
       router.push("/feed");
     } catch (error) {
       console.error(error);
