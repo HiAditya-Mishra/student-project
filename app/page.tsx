@@ -1,25 +1,56 @@
-import Link from "next/link";
+"use client";
+
+import { useRouter } from "next/navigation";
+import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
 
 export default function Home() {
+  const router = useRouter();
+
+  const handleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const userDoc = await getDoc(doc(db, "users", result.user.uid));
+
+      if (!userDoc.exists()) {
+        router.push("/profile-setup");
+        return;
+      }
+
+      router.push("/feed");
+    } catch (error) {
+      console.error(error);
+      alert("Login failed. Please try again.");
+    }
+  };
+
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-gray-100">
-      <h1 className="text-4xl font-bold">CampusSphere</h1>
-      <p className="mt-4 text-gray-600">
-        A community platform built by students, for students.
-      </p>
+    <div className="flex h-screen items-center justify-center bg-[#0f0f0f] px-4">
+      <div className="space-y-6 text-center">
+        <h1 className="text-5xl font-bold tracking-wide text-white">
+          Campus<span className="text-[#ff6a00]">Sphere</span>
+        </h1>
 
-      <div className="mt-6 flex gap-4">
-        <Link href="/login" className="px-6 py-2 bg-blue-600 text-white rounded">
-          Login
-        </Link>
+        <p className="text-lg text-gray-400">Built by students. For students.</p>
 
-        <Link
-          href="/communities"
-          className="px-6 py-2 bg-gray-800 text-white rounded"
-        >
-          Explore Communities
-        </Link>
+        <div className="flex justify-center gap-4">
+          <button
+            onClick={handleLogin}
+            className="orange-gradient rounded-xl px-6 py-3 font-semibold transition hover:scale-105"
+          >
+            Login with Google
+          </button>
+
+          <button
+            onClick={() => router.push("/feed")}
+            className="rounded-xl border border-gray-700 bg-[#1a1a1a] px-6 py-3 transition hover:border-[#ff6a00]"
+          >
+            Explore
+          </button>
+        </div>
       </div>
-    </main>
+    </div>
   );
 }
