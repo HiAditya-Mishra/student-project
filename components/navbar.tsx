@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { User, onAuthStateChanged } from "firebase/auth";
+import { User, onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 
 const links = [
@@ -39,6 +39,16 @@ export default function Navbar() {
       return;
     }
     router.push(`/feed?q=${encodeURIComponent(query)}`);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      router.push("/");
+    } catch (error) {
+      console.error(error);
+      alert("Could not log out right now.");
+    }
   };
 
   return (
@@ -88,13 +98,22 @@ export default function Navbar() {
           </button>
 
           {user ? (
-            <button
-              onClick={() => router.push("/profile")}
-              className="h-9 w-9 rounded-full border border-[#ff8c42] bg-[#1a1a1a] text-sm"
-              title="Profile"
-            >
-              U
-            </button>
+            <>
+              <button
+                onClick={handleLogout}
+                className="rounded-full border border-[#2f2f2f] bg-[#1a1a1a] px-3 py-1.5 text-xs text-gray-200 transition hover:border-[#ff6a00] hover:text-[#ff8c42]"
+                title="Logout"
+              >
+                Logout
+              </button>
+              <button
+                onClick={() => router.push("/profile")}
+                className="h-9 w-9 rounded-full border border-[#ff8c42] bg-[#1a1a1a] text-sm"
+                title="Profile"
+              >
+                U
+              </button>
+            </>
           ) : (
             <button
               onClick={() => router.push("/")}
