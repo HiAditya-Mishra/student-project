@@ -24,12 +24,6 @@ type StudyRoom = {
   participants?: string[];
 };
 
-type Post = {
-  id: string;
-  authorId?: string;
-  likes?: number;
-};
-
 export default function FeedPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -37,15 +31,14 @@ export default function FeedPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [rooms, setRooms] = useState<StudyRoom[]>([]);
-  const [sapphire, setSapphire] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
+  const [feedMode, setFeedMode] = useState<"for-you" | "following">("for-you");
   const [searchAuthors, setSearchAuthors] = useState<AuthorSearchItem[]>([]);
   const [roomsError, setRoomsError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
 
   useEffect(() => {
     let profileUnsubscribe: (() => void) | null = null;
-    let postsUnsubscribe: (() => void) | null = null;
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
@@ -53,12 +46,7 @@ export default function FeedPage() {
           profileUnsubscribe();
           profileUnsubscribe = null;
         }
-        if (postsUnsubscribe) {
-          postsUnsubscribe();
-          postsUnsubscribe = null;
-        }
         setProfile(null);
-        setSapphire(0);
         setAuthLoading(false);
         return;
       }
@@ -94,29 +82,10 @@ export default function FeedPage() {
           setAuthLoading(false);
         },
       );
-
-      if (postsUnsubscribe) postsUnsubscribe();
-      postsUnsubscribe = onSnapshot(
-        collection(db, "posts"),
-        (snapshot) => {
-          const totalLikes = snapshot.docs
-            .map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Omit<Post, "id">) }))
-            .filter((post) => post.authorId === user.uid)
-            .reduce((sum, post) => sum + (post.likes ?? 0), 0);
-          setSapphire(totalLikes);
-        },
-        (error) => {
-          console.error(error);
-          if (error.code === "permission-denied") {
-            setSapphire(0);
-          }
-        },
-      );
     });
 
     return () => {
       if (profileUnsubscribe) profileUnsubscribe();
-      if (postsUnsubscribe) postsUnsubscribe();
       unsubscribe();
     };
   }, []);
@@ -192,8 +161,12 @@ export default function FeedPage() {
   }, [profile?.nickname]);
 
   const topSkills = (profile?.skills ?? []).slice(0, 4);
+  const sapphire = Number(profile?.sapphires ?? 0);
+  const levelTitle = String(profile?.levelTitle ?? "Fresher");
   const liveRoom = rooms.find((room) => (room.participants?.length ?? 0) > 0);
   const readOnlyMode = !publicMode;
+  const followingUsers = profile?.followingUsers ?? [];
+  const followingCommunities = profile?.followingCommunities ?? [];
   const normalizedSearch = searchTerm.trim().toLowerCase();
 
   const matchedProfiles = useMemo(() => {
@@ -225,6 +198,23 @@ export default function FeedPage() {
       console.error(error);
       setPublicMode(!next);
       alert("Could not update profile visibility.");
+    }
+  };
+
+  const toggleFollowAuthor = async (authorId: string) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid === authorId) return;
+
+    const current = new Set(followingUsers);
+    if (current.has(authorId)) current.delete(authorId);
+    else current.add(authorId);
+    const next = Array.from(current);
+
+    setProfile((prev) => ({ ...(prev ?? {}), followingUsers: next }));
+    try {
+      await setDoc(doc(db, "users", currentUser.uid), { followingUsers: next }, { merge: true });
+    } catch (error) {
+      console.error(error);
     }
   };
 
@@ -282,7 +272,33 @@ export default function FeedPage() {
             </div>
           ) : null}
 
-          <PostFeed searchTerm={searchTerm} readOnly={readOnlyMode} />
+          <div className="flex gap-2">
+            <button
+              onClick={() => setFeedMode("for-you")}
+              className={`rounded-lg px-3 py-1 text-xs ${
+                feedMode === "for-you" ? "bg-[#ff6a00] text-white" : "border border-[#2f2f2f]"
+              }`}
+            >
+              For You
+            </button>
+            <button
+              onClick={() => setFeedMode("following")}
+              className={`rounded-lg px-3 py-1 text-xs ${
+                feedMode === "following" ? "bg-[#ff6a00] text-white" : "border border-[#2f2f2f]"
+              }`}
+            >
+              Following
+            </button>
+          </div>
+
+          <PostFeed
+            searchTerm={searchTerm}
+            readOnly={readOnlyMode}
+            feedMode={feedMode}
+            followingUsers={followingUsers}
+            followingCommunities={followingCommunities}
+            onToggleFollowAuthor={toggleFollowAuthor}
+          />
         </section>
 
         <aside className="space-y-4">
@@ -345,7 +361,8 @@ export default function FeedPage() {
             <div className="mt-4 rounded-xl border border-[#2d2d2d] bg-[#101010] p-3">
               <p className="text-xs text-gray-400">Sapphire</p>
               <p className="mt-1 text-2xl font-bold text-[#5bc0ff]">{sapphire}</p>
-              <p className="mt-1 text-xs text-gray-500">Earn Sapphire from likes on your posts.</p>
+              <p className="mt-1 text-xs text-gray-500">Rank: {levelTitle}</p>
+              <p className="mt-1 text-xs text-gray-500">Post Streak: {profile?.postStreak ?? 0} days</p>
             </div>
 
             <button

@@ -7,6 +7,7 @@ import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import Navbar from "@/components/navbar";
 import { countWords, normalizeHandle, resolveAvatar } from "@/lib/profile";
+import { LEVELS } from "@/lib/rewards";
 
 type UserProfile = {
   nickname: string;
@@ -20,6 +21,12 @@ type UserProfile = {
   publicProfile: boolean;
   linkedin: string;
   github: string;
+  sapphires: number;
+  level: number;
+  levelTitle: string;
+  postsCount: number;
+  commentsCount: number;
+  postStreak: number;
 };
 
 const defaultProfile: UserProfile = {
@@ -34,6 +41,12 @@ const defaultProfile: UserProfile = {
   publicProfile: true,
   linkedin: "",
   github: "",
+  sapphires: 0,
+  level: 1,
+  levelTitle: "Fresher",
+  postsCount: 0,
+  commentsCount: 0,
+  postStreak: 0,
 };
 
 const BIO_WORD_LIMIT = 500;
@@ -317,6 +330,7 @@ export default function ProfilePage() {
           <img src={avatarPreview} alt={profile.nickname || "Avatar"} className="h-20 w-20 rounded-full border border-[#ff8c42]" />
           <h3 className="text-xl font-semibold">{profile.nickname || "Campus User"}</h3>
           <p className="text-xs text-gray-400">@{profile.handle || "campus_user"}</p>
+          <p className="text-xs text-[#5bc0ff]">Level: {profile.levelTitle || "Fresher"} | Sapphire: {profile.sapphires ?? 0}</p>
           <p className="text-sm text-gray-300 whitespace-pre-wrap break-words">{profile.bio || "Your bio will appear here."}</p>
           <div className="flex flex-wrap gap-2">
             {(skillsInput.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 10)).map((skill) => (
@@ -324,6 +338,16 @@ export default function ProfilePage() {
                 #{skill}
               </span>
             ))}
+          </div>
+          <div className="rounded-lg border border-[#2a2a2a] bg-[#101010] p-2">
+            <p className="text-xs text-gray-400">Ranks</p>
+            <div className="mt-1 space-y-1">
+              {LEVELS.map((level) => (
+                <p key={level.level} className="text-[11px] text-gray-300">
+                  L{level.level} {level.title} - {level.minSapphires}+
+                </p>
+              ))}
+            </div>
           </div>
         </aside>
       </main>

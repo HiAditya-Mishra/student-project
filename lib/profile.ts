@@ -10,6 +10,17 @@ export type UserProfileDoc = {
   publicProfile?: boolean;
   linkedin?: string;
   github?: string;
+  sapphires?: number;
+  level?: number;
+  levelTitle?: string;
+  postsCount?: number;
+  commentsCount?: number;
+  postStreak?: number;
+  lastPostRewardDate?: string;
+  upvoteRewardDate?: string;
+  upvoteRewardToday?: number;
+  followingUsers?: string[];
+  followingCommunities?: string[];
 };
 
 export function normalizeHandle(input: string) {

@@ -5,6 +5,7 @@ import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp } from "fi
 import { auth, db } from "@/lib/firebase";
 import { normalizeHandle, resolveAvatar } from "@/lib/profile";
 import { getMentionContext, insertMention, MentionContext } from "@/lib/mentions";
+import { rewardPostCreate } from "@/lib/rewards";
 
 type CreatePostProps = {
   mode?: "full" | "compact";
@@ -118,6 +119,8 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
             avatarUrl?: string;
             avatarSeed?: string;
             publicProfile?: boolean;
+            level?: number;
+            levelTitle?: string;
           }
         : {};
 
@@ -129,6 +132,8 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
       const authorName = profile.nickname?.trim() || auth.currentUser?.displayName || "Aspirant";
       const authorHandle = normalizeHandle(profile.handle?.trim() || profile.nickname?.trim() || authorName);
       const authorAvatarUrl = resolveAvatar(profile, auth.currentUser.uid);
+      const authorLevel = Number(profile.level ?? 1);
+      const authorLevelTitle = String(profile.levelTitle ?? "Fresher");
       const mentions = Array.from(
         new Set(
           `${title} ${content}`
@@ -145,11 +150,17 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
         authorId: auth.currentUser.uid,
         authorHandle,
         authorAvatarUrl,
+        authorLevel,
+        authorLevelTitle,
         mentions,
         createdAt: serverTimestamp(),
         likes: 0,
         likedBy: [],
+        reached20Rewarded: false,
+        trendingRewarded: false,
       });
+
+      await rewardPostCreate(auth.currentUser.uid);
 
       setTitle("");
       setContent("");

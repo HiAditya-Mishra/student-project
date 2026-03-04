@@ -17,6 +17,7 @@ import {
 import { auth, db } from "@/lib/firebase";
 import { normalizeHandle, resolveAvatar } from "@/lib/profile";
 import { getMentionContext, insertMention, MentionContext } from "@/lib/mentions";
+import { rewardCommentCreate, rewardCommentUpvote, rewardHelpfulComment, rewardPostUpvote } from "@/lib/rewards";
 
 interface Post {
   id: string;
@@ -28,7 +29,11 @@ interface Post {
   authorId?: string;
   authorHandle?: string;
   authorAvatarUrl?: string;
+  authorLevel?: number;
+  authorLevelTitle?: string;
   mentions?: string[];
+  reached20Rewarded?: boolean;
+  trendingRewarded?: boolean;
   likes: number;
   likedBy?: string[];
 }
@@ -40,6 +45,12 @@ interface Comment {
   authorId?: string;
   authorHandle?: string;
   authorAvatarUrl?: string;
+  authorLevel?: number;
+  authorLevelTitle?: string;
+  likes?: number;
+  likedBy?: string[];
+  helpful?: boolean;
+  helpfulMarkedBy?: string;
 }
 
 type AuthorLite = {
@@ -52,9 +63,20 @@ type AuthorLite = {
 type PostFeedProps = {
   searchTerm?: string;
   readOnly?: boolean;
+  feedMode?: "for-you" | "following";
+  followingUsers?: string[];
+  followingCommunities?: string[];
+  onToggleFollowAuthor?: (authorId: string) => void | Promise<void>;
 };
 
-export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeedProps) {
+export default function PostFeed({
+  searchTerm = "",
+  readOnly = false,
+  feedMode = "for-you",
+  followingUsers = [],
+  followingCommunities = [],
+  onToggleFollowAuthor,
+}: PostFeedProps) {
   const router = useRouter();
   const [posts, setPosts] = useState<Post[]>([]);
   const [authorsById, setAuthorsById] = useState<Record<string, AuthorLite>>({});
@@ -68,6 +90,8 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
   const [commentMentionContext, setCommentMentionContext] = useState<Record<string, MentionContext | null>>({});
   const [commentMentionIndex, setCommentMentionIndex] = useState<Record<string, number>>({});
   const [submittingCommentPostId, setSubmittingCommentPostId] = useState<string | null>(null);
+  const [updatingCommentId, setUpdatingCommentId] = useState<string | null>(null);
+  const [markingHelpfulCommentId, setMarkingHelpfulCommentId] = useState<string | null>(null);
   const commentListeners = useRef<Record<string, () => void>>({});
   const commentInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -134,6 +158,10 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
     try {
       setUpdatingPostId(postId);
       const postRef = doc(db, "posts", postId);
+      let authorIdToReward = "";
+      let crossed20 = false;
+      let hitTrending = false;
+
       await runTransaction(db, async (transaction) => {
         const postSnap = await transaction.get(postRef);
         if (!postSnap.exists()) return;
@@ -141,12 +169,23 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
         const data = postSnap.data() as Post;
         const likedBy = data.likedBy ?? [];
         if (likedBy.includes(user.uid)) return;
+        const previousLikes = data.likes ?? 0;
+        const nextLikes = previousLikes + 1;
 
+        authorIdToReward = data.authorId || "";
+        crossed20 = previousLikes < 20 && nextLikes >= 20 && !data.reached20Rewarded;
+        hitTrending = previousLikes < 50 && nextLikes >= 50 && !data.trendingRewarded;
         transaction.update(postRef, {
-          likes: (data.likes ?? 0) + 1,
+          likes: nextLikes,
           likedBy: [...likedBy, user.uid],
+          reached20Rewarded: data.reached20Rewarded || crossed20,
+          trendingRewarded: data.trendingRewarded || hitTrending,
         });
       });
+
+      if (authorIdToReward) {
+        await rewardPostUpvote(authorIdToReward, { crossed20, trending: hitTrending });
+      }
     } catch (error) {
       console.error(error);
       const message =
@@ -242,7 +281,14 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
       setSubmittingCommentPostId(postId);
       const profileSnapshot = await getDoc(doc(db, "users", user.uid));
       const profile = profileSnapshot.exists()
-        ? profileSnapshot.data() as { nickname?: string; handle?: string; avatarUrl?: string; avatarSeed?: string }
+        ? profileSnapshot.data() as {
+            nickname?: string;
+            handle?: string;
+            avatarUrl?: string;
+            avatarSeed?: string;
+            level?: number;
+            levelTitle?: string;
+          }
         : {};
       const nickname = (profile.nickname ?? "").trim();
       await addDoc(collection(db, "posts", postId, "comments"), {
@@ -251,8 +297,15 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
         authorId: user.uid,
         authorHandle: normalizeHandle(profile.handle || nickname || user.displayName || "Aspirant"),
         authorAvatarUrl: resolveAvatar(profile, user.uid),
+        authorLevel: Number(profile.level ?? 1),
+        authorLevelTitle: String(profile.levelTitle ?? "Fresher"),
+        likes: 0,
+        likedBy: [],
+        helpful: false,
+        helpfulMarkedBy: "",
         createdAt: serverTimestamp(),
       });
+      await rewardCommentCreate(user.uid);
 
       setCommentDrafts((prev) => ({ ...prev, [postId]: "" }));
     } catch (error) {
@@ -260,6 +313,78 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
       alert("Unable to add comment right now.");
     } finally {
       setSubmittingCommentPostId(null);
+    }
+  };
+
+  const handleCommentUpvote = async (postId: string, commentId: string) => {
+    if (readOnly) return;
+    const user = auth.currentUser;
+    if (!user) {
+      alert("Please login to upvote comments.");
+      return;
+    }
+
+    try {
+      setUpdatingCommentId(commentId);
+      const commentRef = doc(db, "posts", postId, "comments", commentId);
+      let commentAuthorId = "";
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(commentRef);
+        if (!snapshot.exists()) return;
+
+        const data = snapshot.data() as Comment;
+        const likedBy = data.likedBy ?? [];
+        if (likedBy.includes(user.uid)) return;
+        commentAuthorId = data.authorId || "";
+
+        transaction.update(commentRef, {
+          likes: (data.likes ?? 0) + 1,
+          likedBy: [...likedBy, user.uid],
+        });
+      });
+
+      if (commentAuthorId) {
+        await rewardCommentUpvote(commentAuthorId);
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Unable to upvote comment right now.");
+    } finally {
+      setUpdatingCommentId(null);
+    }
+  };
+
+  const handleMarkHelpful = async (post: Post, comment: Comment) => {
+    if (readOnly) return;
+    const user = auth.currentUser;
+    if (!user) return;
+    if (!post.authorId || post.authorId !== user.uid) {
+      alert("Only the post author can mark comments helpful.");
+      return;
+    }
+    if (comment.helpful) return;
+
+    try {
+      setMarkingHelpfulCommentId(comment.id);
+      const commentRef = doc(db, "posts", post.id, "comments", comment.id);
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(commentRef);
+        if (!snapshot.exists()) return;
+        const data = snapshot.data() as Comment;
+        if (data.helpful) return;
+        transaction.update(commentRef, {
+          helpful: true,
+          helpfulMarkedBy: user.uid,
+        });
+      });
+      if (comment.authorId) {
+        await rewardHelpfulComment(comment.authorId);
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Unable to mark helpful right now.");
+    } finally {
+      setMarkingHelpfulCommentId(null);
     }
   };
 
@@ -314,6 +439,11 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
 
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const visiblePosts = posts.filter((post) => {
+    if (feedMode === "following") {
+      const followsAuthor = post.authorId ? followingUsers.includes(post.authorId) : false;
+      const followsCommunity = followingCommunities.includes(post.community || "");
+      if (!followsAuthor && !followsCommunity) return false;
+    }
     if (!normalizedSearch) return true;
     const normalizedAuthorHandle = (post.authorHandle || "").toLowerCase();
     return (
@@ -432,7 +562,19 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
               >
                 {post.author || "Aspirant"}
                 {post.authorHandle ? <span className="ml-1 text-xs text-gray-400">@{post.authorHandle}</span> : null}
+                <span className="ml-2 rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-[#5bc0ff]">
+                  {post.authorLevelTitle || "Fresher"}
+                </span>
               </button>
+              {post.authorId && post.authorId !== auth.currentUser?.uid ? (
+                <button
+                  type="button"
+                  onClick={() => onToggleFollowAuthor?.(post.authorId!)}
+                  className="mt-1 rounded border border-[#2f2f2f] px-2 py-0.5 text-[10px] text-gray-300 hover:border-[#ff6a00]"
+                >
+                  {followingUsers.includes(post.authorId) ? "Following" : "Follow"}
+                </button>
+              ) : null}
               <p className="text-xs text-gray-500">{post.community || "general"}</p>
             </div>
           </div>
@@ -502,8 +644,32 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
                       >
                         {comment.author || "Aspirant"}
                         {comment.authorHandle ? <span className="ml-1 text-[11px] text-gray-400">@{comment.authorHandle}</span> : null}
+                        <span className="ml-2 rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-[#5bc0ff]">
+                          {comment.authorLevelTitle || "Fresher"}
+                        </span>
                       </button>
                       <p className="mt-1 text-sm text-gray-300 whitespace-pre-wrap break-words">{renderTextWithMentions(comment.content)}</p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          onClick={() => void handleCommentUpvote(post.id, comment.id)}
+                          disabled={
+                            updatingCommentId === comment.id ||
+                            (comment.likedBy ?? []).includes(auth.currentUser?.uid ?? "")
+                          }
+                          className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-gray-300 hover:border-[#ff6a00] disabled:opacity-60"
+                        >
+                          {(comment.likedBy ?? []).includes(auth.currentUser?.uid ?? "")
+                            ? `Upvoted ${comment.likes ?? 0}`
+                            : `Upvote ${comment.likes ?? 0}`}
+                        </button>
+                        <button
+                          onClick={() => void handleMarkHelpful(post, comment)}
+                          disabled={comment.helpful || markingHelpfulCommentId === comment.id}
+                          className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-green-300 hover:border-green-500 disabled:opacity-60"
+                        >
+                          {comment.helpful ? "Helpful" : "Mark Helpful"}
+                        </button>
+                      </div>
                     </div>
                   ))
                 ) : (

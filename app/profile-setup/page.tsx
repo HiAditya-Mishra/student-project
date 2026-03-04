@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { normalizeHandle } from "@/lib/profile";
+import { getLevelFromSapphires } from "@/lib/rewards";
 
 export default function ProfileSetupPage() {
   const [nickname, setNickname] = useState("");
@@ -27,6 +28,7 @@ export default function ProfileSetupPage() {
 
     try {
       setSaving(true);
+      const initialLevel = getLevelFromSapphires(0);
       await setDoc(
         doc(db, "users", user.uid),
         {
@@ -41,6 +43,15 @@ export default function ProfileSetupPage() {
           publicProfile: true,
           linkedin: "",
           github: "",
+          sapphires: 0,
+          level: initialLevel.level,
+          levelTitle: initialLevel.title,
+          postsCount: 0,
+          commentsCount: 0,
+          postStreak: 0,
+          lastPostRewardDate: "",
+          upvoteRewardDate: "",
+          upvoteRewardToday: 0,
           email: user.email ?? "",
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),

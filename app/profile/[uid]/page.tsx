@@ -90,6 +90,7 @@ export default function PublicProfilePage() {
               <div>
                 <h1 className="text-2xl font-bold text-[#ff8c42]">{profile.nickname || "Campus User"}</h1>
                 <p className="text-sm text-gray-400">@{profile.handle || "campus_user"}</p>
+                <p className="text-xs text-[#5bc0ff]">{profile.levelTitle || "Fresher"} | {profile.sapphires ?? 0} Sapphire</p>
               </div>
             </div>
 
