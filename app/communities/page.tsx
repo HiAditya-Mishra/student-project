@@ -1,10 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Navbar from "@/components/navbar";
 import { auth, db } from "@/lib/firebase";
 import {
-  addDoc,
   arrayRemove,
   arrayUnion,
   collection,
@@ -13,10 +12,14 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
 } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+import { normalizeHandle } from "@/lib/profile";
+import { useRouter } from "next/navigation";
 
 type PrivacyType = "public" | "private" | "invite";
 type CommunityTab = "posts" | "trending" | "events" | "members" | "leaderboard";
@@ -33,9 +36,12 @@ type Community = {
   privacy?: PrivacyType;
   membersCount?: number;
   onlineCount?: number;
+  memberIds?: string[];
+  onlineMemberIds?: string[];
   modIds?: string[];
   bannedUserIds?: string[];
   events?: string[];
+  ownerId?: string;
 };
 
 type Post = {
@@ -46,6 +52,18 @@ type Post = {
   authorId?: string;
   author?: string;
   createdAt?: { seconds?: number };
+};
+
+type UserLite = {
+  id: string;
+  nickname: string;
+  handle: string;
+};
+
+type UserDocLite = {
+  nickname?: string;
+  handle?: string;
+  followingCommunities?: string[];
 };
 
 const defaultCommunities: Community[] = [
@@ -94,18 +112,50 @@ function privacyIcon(privacy?: PrivacyType) {
 }
 
 export default function CommunitiesPage() {
+  const router = useRouter();
   const [communities, setCommunities] = useState<Community[]>(defaultCommunities);
-  const [joined, setJoined] = useState<Record<string, boolean>>({ general: true });
+  const [joined, setJoined] = useState<Record<string, boolean>>({});
+  const [currentUserId, setCurrentUserId] = useState<string>("");
   const [selected, setSelected] = useState<string>("general");
   const [posts, setPosts] = useState<Post[]>([]);
+  const [usersById, setUsersById] = useState<Record<string, UserLite>>({});
   const [tab, setTab] = useState<CommunityTab>("posts");
   const [sortMode, setSortMode] = useState<SortMode>("hot");
   const [rulesExpanded, setRulesExpanded] = useState(false);
   const [communityError, setCommunityError] = useState<string | null>(null);
-  const [creatingCommunity, setCreatingCommunity] = useState(false);
-  const [newCommunityName, setNewCommunityName] = useState("");
-  const [newCommunitySummary, setNewCommunitySummary] = useState("");
-  const [newCommunityPrivacy, setNewCommunityPrivacy] = useState<PrivacyType>("public");
+  const [joinBusy, setJoinBusy] = useState(false);
+
+  useEffect(() => {
+    let profileUnsub: (() => void) | null = null;
+    const authUnsub = onAuthStateChanged(auth, (user) => {
+      if (profileUnsub) {
+        profileUnsub();
+        profileUnsub = null;
+      }
+
+      if (!user) {
+        setCurrentUserId("");
+        setJoined({});
+        return;
+      }
+
+      setCurrentUserId(user.uid);
+      profileUnsub = onSnapshot(doc(db, "users", user.uid), (snapshot) => {
+        const data = (snapshot.exists() ? snapshot.data() : {}) as UserDocLite;
+        const following = data.followingCommunities ?? [];
+        const next: Record<string, boolean> = {};
+        following.forEach((communityId) => {
+          next[communityId] = true;
+        });
+        setJoined(next);
+      });
+    });
+
+    return () => {
+      if (profileUnsub) profileUnsub();
+      authUnsub();
+    };
+  }, []);
 
   useEffect(() => {
     const communitiesUnsub = onSnapshot(
@@ -121,7 +171,21 @@ export default function CommunitiesPage() {
         defaultCommunities.forEach((community) => merged.set(community.id, community));
         remote.forEach((community) => {
           const base = merged.get(community.id) ?? { id: community.id } as Community;
-          merged.set(community.id, { ...base, ...community });
+          const memberIds = Array.isArray(community.memberIds) ? community.memberIds : base.memberIds ?? [];
+          const onlineMemberIds = Array.isArray(community.onlineMemberIds)
+            ? community.onlineMemberIds
+            : base.onlineMemberIds ?? [];
+          merged.set(community.id, {
+            ...base,
+            ...community,
+            memberIds,
+            onlineMemberIds,
+            rules: community.rules ?? base.rules ?? [],
+            tags: community.tags ?? base.tags ?? [],
+            events: community.events ?? base.events ?? [],
+            modIds: community.modIds ?? base.modIds ?? [],
+            bannedUserIds: community.bannedUserIds ?? base.bannedUserIds ?? [],
+          });
         });
         setCommunities(Array.from(merged.values()));
       },
@@ -157,6 +221,29 @@ export default function CommunitiesPage() {
       postsUnsub();
     };
   }, []);
+
+  useEffect(() => {
+    const usersUnsub = onSnapshot(collection(db, "users"), (snapshot) => {
+      const next: Record<string, UserLite> = {};
+      snapshot.docs.forEach((docSnapshot) => {
+        const data = docSnapshot.data() as UserDocLite;
+        next[docSnapshot.id] = {
+          id: docSnapshot.id,
+          nickname: (data.nickname || "Campus User").trim(),
+          handle: normalizeHandle(data.handle || data.nickname || "campus_user"),
+        };
+      });
+      setUsersById(next);
+    });
+
+    return () => usersUnsub();
+  }, []);
+
+  useEffect(() => {
+    if (!communities.some((community) => community.id === selected) && communities.length) {
+      setSelected(communities[0].id);
+    }
+  }, [communities, selected]);
 
   const selectedCommunity = useMemo(
     () => communities.find((community) => community.id === selected) ?? communities[0],
@@ -217,78 +304,116 @@ export default function CommunitiesPage() {
   }, [filteredCommunityPosts]);
 
   const leaderboard = [...memberRows].sort((a, b) => b.likes - a.likes).slice(0, 10);
-  const isMod = Boolean(auth.currentUser && selectedCommunity?.modIds?.includes(auth.currentUser.uid));
+  const isMod = Boolean(currentUserId && selectedCommunity?.modIds?.includes(currentUserId));
+  const isJoinedSelected = Boolean(selectedCommunity && joined[selectedCommunity.id]);
 
-  const toggleJoin = async () => {
-    const user = auth.currentUser;
-    if (!user || !selectedCommunity) {
-      alert("Please login first.");
-      return;
-    }
-    const isJoined = joined[selectedCommunity.id];
-    setJoined((prev) => ({ ...prev, [selectedCommunity.id]: !isJoined }));
-
-    try {
-      await setDoc(
-        doc(db, "users", user.uid),
-        {
-          followingCommunities: isJoined
-            ? arrayRemove(selectedCommunity.id)
-            : arrayUnion(selectedCommunity.id),
-        },
-        { merge: true },
-      );
-      const communityRef = doc(db, "communities", selectedCommunity.id);
-      await setDoc(
-        communityRef,
-        {
-          membersCount: (selectedCommunity.membersCount ?? 0) + (isJoined ? -1 : 1),
-        },
-        { merge: true },
-      );
-    } catch (error) {
-      console.error(error);
-    }
+  const getMembersCount = (community: Community) => {
+    if (typeof community.membersCount === "number") return community.membersCount;
+    if (community.memberIds?.length) return community.memberIds.length;
+    return communityRealtimeStats[community.id]?.creators.size ?? 0;
   };
 
-  const handleCreateCommunity = async (event: FormEvent) => {
-    event.preventDefault();
-    const user = auth.currentUser;
-    if (!user) {
+  const getOnlineCount = (community: Community) => {
+    if (typeof community.onlineCount === "number") return community.onlineCount;
+    if (community.onlineMemberIds?.length) return community.onlineMemberIds.length;
+    return communityRealtimeStats[community.id]?.onlineCreators.size ?? 0;
+  };
+
+  const memberDirectory = useMemo(() => {
+    const memberIds = selectedCommunity.memberIds ?? [];
+    const onlineIds = new Set(selectedCommunity.onlineMemberIds ?? []);
+    return memberIds.map((id) => {
+      const profile = usersById[id];
+      return {
+        id,
+        name: profile?.nickname || "Campus User",
+        handle: profile?.handle || "campus_user",
+        online: onlineIds.has(id),
+      };
+    });
+  }, [selectedCommunity.memberIds, selectedCommunity.onlineMemberIds, usersById]);
+
+  const onlineMembers = memberDirectory.filter((member) => member.online);
+
+  const toggleJoin = async () => {
+    if (!currentUserId || !selectedCommunity) {
       alert("Please login first.");
       return;
     }
-    if (!newCommunityName.trim() || !newCommunitySummary.trim()) {
-      alert("Name and summary are required.");
-      return;
-    }
+    if (joinBusy) return;
 
     try {
-      setCreatingCommunity(true);
-      await addDoc(collection(db, "communities"), {
-        name: newCommunityName.trim(),
-        summary: newCommunitySummary.trim(),
-        icon: newCommunityName.trim().slice(0, 1).toUpperCase(),
-        banner: "linear-gradient(120deg, #3b1d00, #ff6a00)",
-        rules: ["Be respectful", "No spam", "No harassment"],
-        tags: ["Student"],
-        privacy: newCommunityPrivacy,
-        membersCount: 1,
-        onlineCount: 1,
-        modIds: [user.uid],
-        bannedUserIds: [],
-        events: [],
-        ownerId: user.uid,
-        createdAt: serverTimestamp(),
+      setJoinBusy(true);
+      const communityRef = doc(db, "communities", selectedCommunity.id);
+      const userRef = doc(db, "users", currentUserId);
+
+      await runTransaction(db, async (tx) => {
+        const [communitySnap, userSnap] = await Promise.all([tx.get(communityRef), tx.get(userRef)]);
+
+        const fallback = defaultCommunities.find((community) => community.id === selectedCommunity.id);
+        const raw = (communitySnap.exists() ? communitySnap.data() : {}) as Partial<Community>;
+        const currentMemberIds = Array.isArray(raw.memberIds) ? raw.memberIds : [];
+        const currentOnlineIds = Array.isArray(raw.onlineMemberIds) ? raw.onlineMemberIds : [];
+        const currentlyJoined = currentMemberIds.includes(currentUserId);
+
+        const nextMemberIds = currentlyJoined
+          ? currentMemberIds.filter((id) => id !== currentUserId)
+          : Array.from(new Set([...currentMemberIds, currentUserId]));
+        const nextOnlineIds = currentlyJoined
+          ? currentOnlineIds.filter((id) => id !== currentUserId)
+          : Array.from(new Set([...currentOnlineIds, currentUserId]));
+
+        if (!communitySnap.exists() && fallback) {
+          tx.set(
+            communityRef,
+            {
+              name: fallback.name,
+              icon: fallback.icon,
+              banner: fallback.banner,
+              summary: fallback.summary,
+              rules: fallback.rules,
+              tags: fallback.tags,
+              privacy: fallback.privacy,
+              events: fallback.events ?? [],
+              modIds: fallback.modIds ?? [],
+              bannedUserIds: fallback.bannedUserIds ?? [],
+              createdAt: serverTimestamp(),
+            },
+            { merge: true },
+          );
+        }
+
+        tx.set(
+          communityRef,
+          {
+            memberIds: nextMemberIds,
+            onlineMemberIds: nextOnlineIds,
+            membersCount: nextMemberIds.length,
+            onlineCount: nextOnlineIds.length,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
+
+        const userData = (userSnap.exists() ? userSnap.data() : {}) as UserDocLite;
+        const following = Array.isArray(userData.followingCommunities) ? userData.followingCommunities : [];
+        const nextFollowing = currentlyJoined
+          ? following.filter((id) => id !== selectedCommunity.id)
+          : Array.from(new Set([...following, selectedCommunity.id]));
+        tx.set(
+          userRef,
+          {
+            followingCommunities: nextFollowing,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
       });
-      setNewCommunityName("");
-      setNewCommunitySummary("");
-      setNewCommunityPrivacy("public");
     } catch (error) {
       console.error(error);
-      alert("Could not create community. Check Firestore rules.");
+      alert("Could not update membership.");
     } finally {
-      setCreatingCommunity(false);
+      setJoinBusy(false);
     }
   };
 
@@ -307,6 +432,8 @@ export default function CommunitiesPage() {
     try {
       await updateDoc(doc(db, "communities", selectedCommunity.id), {
         bannedUserIds: arrayUnion(userId),
+        memberIds: arrayRemove(userId),
+        onlineMemberIds: arrayRemove(userId),
       });
     } catch (error) {
       console.error(error);
@@ -344,43 +471,18 @@ export default function CommunitiesPage() {
                       {privacyIcon(community.privacy)} {privacyLabel(community.privacy)}
                     </p>
                     <p className="mt-1 text-[11px] text-gray-500">
-                      Members: {community.membersCount ?? communityRealtimeStats[community.id]?.creators.size ?? 0}
+                      Members: {getMembersCount(community)}
                     </p>
                   </button>
                 ))}
               </div>
-
-          <form onSubmit={handleCreateCommunity} className="space-y-2 rounded-xl border border-[#2a2a2a] bg-[#101010] p-3">
-            <p className="text-xs font-semibold text-[#ff8c42]">Create Community</p>
-            <input
-              value={newCommunityName}
-              onChange={(event) => setNewCommunityName(event.target.value)}
-              placeholder="Name"
-              className="w-full rounded border border-[#303030] bg-[#151515] px-2 py-1.5 text-xs"
-            />
-            <input
-              value={newCommunitySummary}
-              onChange={(event) => setNewCommunitySummary(event.target.value)}
-              placeholder="Summary"
-              className="w-full rounded border border-[#303030] bg-[#151515] px-2 py-1.5 text-xs"
-            />
-            <select
-              value={newCommunityPrivacy}
-              onChange={(event) => setNewCommunityPrivacy(event.target.value as PrivacyType)}
-              className="w-full rounded border border-[#303030] bg-[#151515] px-2 py-1.5 text-xs"
-            >
-              <option value="public">Public</option>
-              <option value="private">Private</option>
-              <option value="invite">Invite Only</option>
-            </select>
-            <button
-              type="submit"
-              disabled={creatingCommunity}
-              className="w-full rounded bg-[#ff6a00] px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
-            >
-              {creatingCommunity ? "Creating..." : "Create"}
-            </button>
-          </form>
+          <button
+            type="button"
+            onClick={() => router.push("/communities/create")}
+            className="w-full rounded-xl border border-[#ff6a00] bg-[#2a1608] px-3 py-2 text-sm font-semibold text-[#ff8c42] hover:bg-[#341b0a]"
+          >
+            Create Community
+          </button>
         </aside>
 
         <section className="space-y-4">
@@ -394,26 +496,27 @@ export default function CommunitiesPage() {
                   <div>
                     <h1 className="text-xl font-bold">{selectedCommunity.name}</h1>
                     <p className="text-xs text-white/80">
-                      {selectedCommunity.membersCount ?? communityRealtimeStats[selectedCommunity.id]?.creators.size ?? 0} members
+                      {getMembersCount(selectedCommunity)} members
                       {" | "}
-                      {selectedCommunity.onlineCount ?? communityRealtimeStats[selectedCommunity.id]?.onlineCreators.size ?? 0} online
+                      {getOnlineCount(selectedCommunity)} online
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={() => void toggleJoin()}
+                  disabled={joinBusy}
                   className={`rounded-xl px-4 py-2 text-sm font-semibold ${
-                    joined[selectedCommunity.id] ? "border border-white/70 bg-black/20" : "bg-[#ff6a00]"
+                    isJoinedSelected ? "border border-white/70 bg-black/20" : "bg-[#ff6a00]"
                   }`}
                 >
-                  {joined[selectedCommunity.id] ? "Leave" : "Join"}
+                  {joinBusy ? "Updating..." : isJoinedSelected ? "Leave" : "Join"}
                 </button>
               </div>
             </div>
             <div className="p-4">
               <p className="text-sm text-gray-300">{selectedCommunity.summary}</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                {selectedCommunity.tags.map((tag) => (
+                {(selectedCommunity.tags ?? []).map((tag) => (
                   <span key={tag} className="rounded-md bg-[#2a1b12] px-2 py-1 text-xs text-[#ff8c42]">
                     {tag}
                   </span>
@@ -428,7 +531,7 @@ export default function CommunitiesPage() {
               </button>
               {rulesExpanded ? (
                 <ol className="mt-2 space-y-1 text-sm text-gray-300">
-                  {selectedCommunity.rules.map((rule, index) => (
+                  {(selectedCommunity.rules ?? []).map((rule, index) => (
                     <li key={rule} className="rounded-lg border border-[#2a2a2a] bg-[#101010] px-3 py-2">
                       {index + 1}. {rule}
                     </li>
@@ -529,12 +632,45 @@ export default function CommunitiesPage() {
 
           {tab === "members" ? (
             <div className="space-y-2">
-              {memberRows.map((member) => (
-                <div key={member.id} className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-3">
-                  <p className="font-semibold">{member.name}</p>
-                  <p className="text-xs text-gray-400">{member.posts} posts | {member.likes} likes</p>
-                </div>
-              ))}
+              <div className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-3">
+                <p className="text-sm font-semibold text-[#ff8c42]">Online Members ({onlineMembers.length})</p>
+                {onlineMembers.length ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {onlineMembers.map((member) => (
+                      <span
+                        key={`online-${member.id}`}
+                        className="rounded-full border border-green-700/60 bg-green-950/40 px-2 py-1 text-xs text-green-300"
+                      >
+                        {member.name} @{member.handle}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-xs text-gray-500">No online members right now.</p>
+                )}
+              </div>
+              {memberDirectory.length ? (
+                memberDirectory.map((member) => (
+                  <div key={member.id} className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-3">
+                    <p className="font-semibold">{member.name}</p>
+                    <p className="text-xs text-gray-400">
+                      @{member.handle} | {member.online ? "Online" : "Offline"}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                memberRows.map((member) => (
+                  <div key={member.id} className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-3">
+                    <p className="font-semibold">{member.name}</p>
+                    <p className="text-xs text-gray-400">{member.posts} posts | {member.likes} likes</p>
+                  </div>
+                ))
+              )}
+              {!memberDirectory.length && !memberRows.length ? (
+                <p className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-4 text-sm text-gray-500">
+                  No members yet.
+                </p>
+              ) : null}
             </div>
           ) : null}
 
