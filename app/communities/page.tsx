@@ -288,8 +288,8 @@ export default function CommunitiesPage() {
   };
 
   const memberDirectory = useMemo(() => {
-    const memberIds = selectedCommunity.memberIds ?? [];
-    const onlineIds = new Set(selectedCommunity.onlineMemberIds ?? []);
+    const memberIds = selectedCommunity?.memberIds ?? [];
+    const onlineIds = new Set(selectedCommunity?.onlineMemberIds ?? []);
     return memberIds.map((id) => {
       const profile = usersById[id];
       return {
@@ -299,7 +299,7 @@ export default function CommunitiesPage() {
         online: onlineIds.has(id),
       };
     });
-  }, [selectedCommunity.memberIds, selectedCommunity.onlineMemberIds, usersById]);
+  }, [selectedCommunity?.memberIds, selectedCommunity?.onlineMemberIds, usersById]);
 
   const onlineMembers = memberDirectory.filter((member) => member.online);
 
