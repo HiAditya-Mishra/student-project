@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { collection, onSnapshot } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import Navbar from "@/components/navbar";
 import { resolveAvatar, UserProfileDoc } from "@/lib/profile";
@@ -26,42 +26,41 @@ export default function PublicProfilePage() {
       return;
     }
 
-    const unsubscribe = onSnapshot(
-      collection(db, "users"),
-      (snapshot) => {
-        const matching = snapshot.docs.find((docSnapshot) => docSnapshot.id === uid);
-        if (!matching) {
+    const run = async () => {
+      try {
+        const snapshot = await getDoc(doc(db, "users", uid));
+        if (!snapshot.exists()) {
           setError("Profile not found.");
           setProfile(null);
-          setLoading(false);
           return;
         }
 
-        const data = matching.data() as PublicProfile;
+        const data = snapshot.data() as PublicProfile;
         const isOwner = auth.currentUser?.uid === uid;
         if (data.publicProfile === false && !isOwner) {
           setError("This profile is private.");
           setProfile(null);
-          setLoading(false);
           return;
         }
 
         setError(null);
         setProfile(data);
-        setLoading(false);
-      },
-      (snapshotError) => {
-        console.error(snapshotError);
+      } catch (readError) {
+        console.error(readError);
         setError(
-          snapshotError.code === "permission-denied"
-            ? "Profile access is blocked by Firestore rules."
+          typeof readError === "object" &&
+            readError &&
+            "code" in readError &&
+            readError.code === "permission-denied"
+            ? "This profile is private."
             : "Could not load this profile.",
         );
+      } finally {
         setLoading(false);
-      },
-    );
+      }
+    };
 
-    return () => unsubscribe();
+    void run();
   }, [uid]);
 
   const avatar = useMemo(() => resolveAvatar(profile, uid), [profile, uid]);

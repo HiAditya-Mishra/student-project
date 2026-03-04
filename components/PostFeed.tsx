@@ -15,7 +15,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
-import { normalizeHandle, resolveAvatar, UserProfileDoc } from "@/lib/profile";
+import { normalizeHandle, resolveAvatar } from "@/lib/profile";
 import { getMentionContext, insertMention, MentionContext } from "@/lib/mentions";
 
 interface Post {
@@ -42,7 +42,12 @@ interface Comment {
   authorAvatarUrl?: string;
 }
 
-type UserLite = UserProfileDoc & { id: string };
+type AuthorLite = {
+  id: string;
+  nickname: string;
+  handle: string;
+  avatarUrl?: string;
+};
 
 type PostFeedProps = {
   searchTerm?: string;
@@ -52,8 +57,8 @@ type PostFeedProps = {
 export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeedProps) {
   const router = useRouter();
   const [posts, setPosts] = useState<Post[]>([]);
-  const [usersById, setUsersById] = useState<Record<string, UserLite>>({});
-  const [usersByHandle, setUsersByHandle] = useState<Record<string, UserLite>>({});
+  const [authorsById, setAuthorsById] = useState<Record<string, AuthorLite>>({});
+  const [authorsByHandle, setAuthorsByHandle] = useState<Record<string, AuthorLite>>({});
   const [feedError, setFeedError] = useState<string | null>(null);
   const [updatingPostId, setUpdatingPostId] = useState<string | null>(null);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
@@ -67,20 +72,6 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
   const commentInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
-    const unsubscribeUsers = onSnapshot(collection(db, "users"), (snapshot) => {
-      const nextById: Record<string, UserLite> = {};
-      const nextByHandle: Record<string, UserLite> = {};
-      snapshot.forEach((docSnapshot) => {
-        const data = docSnapshot.data() as UserProfileDoc;
-        const userLite: UserLite = { ...data, id: docSnapshot.id };
-        nextById[docSnapshot.id] = userLite;
-        const handle = normalizeHandle(data.handle || data.nickname || "");
-        nextByHandle[handle] = userLite;
-      });
-      setUsersById(nextById);
-      setUsersByHandle(nextByHandle);
-    });
-
     const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
 
     const unsubscribe = onSnapshot(
@@ -92,6 +83,23 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
           ...(docSnapshot.data() as Omit<Post, "id">),
         }));
         setPosts(fetchedPosts);
+
+        const nextAuthorsById: Record<string, AuthorLite> = {};
+        const nextAuthorsByHandle: Record<string, AuthorLite> = {};
+        fetchedPosts.forEach((post) => {
+          if (!post.authorId) return;
+          const handle = normalizeHandle(post.authorHandle || post.author || "");
+          const author: AuthorLite = {
+            id: post.authorId,
+            nickname: (post.author || "Campus User").trim(),
+            handle,
+            avatarUrl: post.authorAvatarUrl,
+          };
+          nextAuthorsById[author.id] = author;
+          nextAuthorsByHandle[author.handle] = author;
+        });
+        setAuthorsById(nextAuthorsById);
+        setAuthorsByHandle(nextAuthorsByHandle);
       },
       (error) => {
         console.error(error);
@@ -105,7 +113,6 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
 
     return () => {
       unsubscribe();
-      unsubscribeUsers();
     };
   }, []);
 
@@ -176,6 +183,37 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
           ...(commentSnapshot.data() as Omit<Comment, "id">),
         }));
         setCommentsByPost((prev) => ({ ...prev, [postId]: comments }));
+
+        if (comments.length) {
+          setAuthorsById((prev) => {
+            const next = { ...prev };
+            comments.forEach((comment) => {
+              if (!comment.authorId) return;
+              const handle = normalizeHandle(comment.authorHandle || comment.author || "");
+              next[comment.authorId] = {
+                id: comment.authorId,
+                nickname: (comment.author || "Campus User").trim(),
+                handle,
+                avatarUrl: comment.authorAvatarUrl,
+              };
+            });
+            return next;
+          });
+          setAuthorsByHandle((prev) => {
+            const next = { ...prev };
+            comments.forEach((comment) => {
+              if (!comment.authorId) return;
+              const handle = normalizeHandle(comment.authorHandle || comment.author || "");
+              next[handle] = {
+                id: comment.authorId,
+                nickname: (comment.author || "Campus User").trim(),
+                handle,
+                avatarUrl: comment.authorAvatarUrl,
+              };
+            });
+            return next;
+          });
+        }
       },
       (error) => {
         console.error(error);
@@ -302,7 +340,7 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
       }
 
       const handle = normalizeHandle(match[1]);
-      const mentionUser = usersByHandle[handle];
+      const mentionUser = authorsByHandle[handle];
       const clickable = Boolean(mentionUser?.id);
       if (!clickable) {
         return (
@@ -330,13 +368,12 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
     if (!context) return [];
 
     const token = context.query.trim();
-    return Object.values(usersById)
-      .filter((user) => user.publicProfile !== false)
+    return Object.values(authorsById)
       .map((user) => ({
         id: user.id,
-        nickname: user.nickname || "Campus User",
-        handle: normalizeHandle(user.handle || user.nickname || ""),
-        avatar: resolveAvatar(user, user.id),
+        nickname: user.nickname,
+        handle: user.handle,
+        avatar: user.avatarUrl || resolveAvatar({ avatarSeed: user.id }, user.id),
       }))
       .filter((user) => {
         if (!token) return true;
@@ -383,7 +420,7 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
         <article key={post.id} className="rounded-2xl border border-[#ff6a00] bg-[#141414] p-4 shadow-[0_0_14px_rgba(255,106,0,0.2)]">
           <div className="mb-3 flex items-center gap-2">
             <img
-              src={post.authorAvatarUrl || resolveAvatar(usersById[post.authorId ?? ""], post.authorId || post.author || "user")}
+              src={post.authorAvatarUrl || authorsById[post.authorId ?? ""]?.avatarUrl || resolveAvatar({ avatarSeed: post.authorId || post.author || "user" }, post.authorId || post.author || "user")}
               alt={post.author}
               className="h-8 w-8 rounded-full border border-[#ff8c42]"
             />

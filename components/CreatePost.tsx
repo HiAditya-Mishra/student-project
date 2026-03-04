@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
-import { normalizeHandle, resolveAvatar, UserProfileDoc } from "@/lib/profile";
+import { normalizeHandle, resolveAvatar } from "@/lib/profile";
 import { getMentionContext, insertMention, MentionContext } from "@/lib/mentions";
 
 type CreatePostProps = {
@@ -15,7 +15,9 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
   const [content, setContent] = useState("");
   const [community, setCommunity] = useState("general");
   const [loading, setLoading] = useState(false);
-  const [users, setUsers] = useState<Array<UserProfileDoc & { id: string }>>([]);
+  const [mentionCandidates, setMentionCandidates] = useState<
+    Array<{ id: string; nickname: string; handle: string; avatar: string }>
+  >([]);
   const [mentionContext, setMentionContext] = useState<MentionContext | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [imageDataUrl, setImageDataUrl] = useState("");
@@ -26,17 +28,34 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
-      collection(db, "users"),
+      collection(db, "posts"),
       (snapshot) => {
-        const nextUsers = snapshot.docs.map((docSnapshot) => ({
-          id: docSnapshot.id,
-          ...(docSnapshot.data() as UserProfileDoc),
-        }));
-        setUsers(nextUsers);
+        const seen = new Set<string>();
+        const nextCandidates: Array<{ id: string; nickname: string; handle: string; avatar: string }> = [];
+
+        snapshot.docs.forEach((docSnapshot) => {
+          const data = docSnapshot.data() as {
+            authorId?: string;
+            author?: string;
+            authorHandle?: string;
+            authorAvatarUrl?: string;
+          };
+
+          const id = data.authorId?.trim();
+          if (!id || seen.has(id)) return;
+          seen.add(id);
+
+          const nickname = (data.author || "Campus User").trim();
+          const handle = normalizeHandle(data.authorHandle || nickname);
+          const avatar = data.authorAvatarUrl?.trim() || resolveAvatar({ avatarSeed: id }, id);
+          nextCandidates.push({ id, nickname, handle, avatar });
+        });
+
+        setMentionCandidates(nextCandidates.slice(0, 100));
       },
       (error) => {
         console.error(error);
-        setUsers([]);
+        setMentionCandidates([]);
       },
     );
 
@@ -47,20 +66,13 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
     if (!mentionContext) return [];
     const token = mentionContext.query.trim();
 
-    return users
-      .filter((user) => user.publicProfile !== false)
-      .map((user) => ({
-        id: user.id,
-        nickname: user.nickname || "Campus User",
-        handle: normalizeHandle(user.handle || user.nickname || ""),
-        avatar: resolveAvatar(user, user.id),
-      }))
+    return mentionCandidates
       .filter((user) => {
         if (!token) return true;
         return user.handle.includes(token) || user.nickname.toLowerCase().includes(token);
       })
       .slice(0, 6);
-  }, [mentionContext, users]);
+  }, [mentionContext, mentionCandidates]);
 
   const syncMentionContext = (nextText: string, caret: number) => {
     const nextMentionContext = getMentionContext(nextText, caret);

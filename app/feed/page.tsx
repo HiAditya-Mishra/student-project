@@ -11,7 +11,12 @@ import { auth, db } from "@/lib/firebase";
 import { normalizeHandle, resolveAvatar, UserProfileDoc } from "@/lib/profile";
 
 type UserProfile = UserProfileDoc;
-type UserListItem = UserProfileDoc & { id: string };
+type AuthorSearchItem = {
+  id: string;
+  nickname: string;
+  handle: string;
+  avatarUrl?: string;
+};
 
 type StudyRoom = {
   id: string;
@@ -34,7 +39,7 @@ export default function FeedPage() {
   const [rooms, setRooms] = useState<StudyRoom[]>([]);
   const [sapphire, setSapphire] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
-  const [users, setUsers] = useState<UserListItem[]>([]);
+  const [searchAuthors, setSearchAuthors] = useState<AuthorSearchItem[]>([]);
   const [roomsError, setRoomsError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
 
@@ -124,17 +129,33 @@ export default function FeedPage() {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
-      collection(db, "users"),
+      collection(db, "posts"),
       (snapshot) => {
-        const fetchedUsers: UserListItem[] = snapshot.docs.map((docSnapshot) => ({
-          id: docSnapshot.id,
-          ...(docSnapshot.data() as UserProfileDoc),
-        }));
-        setUsers(fetchedUsers);
+        const seen = new Set<string>();
+        const nextAuthors: AuthorSearchItem[] = [];
+        snapshot.docs.forEach((docSnapshot) => {
+          const data = docSnapshot.data() as {
+            authorId?: string;
+            author?: string;
+            authorHandle?: string;
+            authorAvatarUrl?: string;
+          };
+          const id = data.authorId?.trim();
+          if (!id || seen.has(id)) return;
+          seen.add(id);
+
+          nextAuthors.push({
+            id,
+            nickname: (data.author || "Campus User").trim(),
+            handle: normalizeHandle(data.authorHandle || data.author || ""),
+            avatarUrl: data.authorAvatarUrl,
+          });
+        });
+        setSearchAuthors(nextAuthors);
       },
       (error) => {
         console.error(error);
-        setUsers([]);
+        setSearchAuthors([]);
       },
     );
 
@@ -179,23 +200,17 @@ export default function FeedPage() {
     if (!normalizedSearch) return [];
     const token = normalizedSearch.startsWith("@") ? normalizedSearch.slice(1) : normalizedSearch;
 
-    return users
-      .filter((user) => {
-        const nickname = (user.nickname || "").toLowerCase();
-        const handle = normalizeHandle(user.handle || user.nickname || "");
-        const skills = (user.skills ?? []).join(" ").toLowerCase();
-        const hobbies = (user.hobbies || "").toLowerCase();
-        const interests = (user.interests || "").toLowerCase();
+    return searchAuthors
+      .filter((author) => {
+        const nickname = author.nickname.toLowerCase();
+        const handle = author.handle;
         return (
           nickname.includes(token) ||
-          handle.includes(token) ||
-          skills.includes(token) ||
-          hobbies.includes(token) ||
-          interests.includes(token)
+          handle.includes(token)
         );
       })
       .slice(0, 8);
-  }, [normalizedSearch, users]);
+  }, [normalizedSearch, searchAuthors]);
 
   const handleToggleVisibility = async () => {
     const user = auth.currentUser;
@@ -250,7 +265,7 @@ export default function FeedPage() {
                       className="flex items-center gap-2 rounded-xl border border-[#2e2e2e] bg-[#111111] p-2 text-left hover:border-[#ff6a00]"
                     >
                       <img
-                        src={resolveAvatar(matched, matched.id)}
+                        src={matched.avatarUrl || resolveAvatar({ avatarSeed: matched.id }, matched.id)}
                         alt={matched.nickname || "User"}
                         className="h-10 w-10 rounded-full border border-[#ff8c42]"
                       />
