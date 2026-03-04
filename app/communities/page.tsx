@@ -66,38 +66,7 @@ type UserDocLite = {
   followingCommunities?: string[];
 };
 
-const defaultCommunities: Community[] = [
-  {
-    id: "general",
-    name: "General",
-    icon: "G",
-    summary: "Open forum for campus life, announcements, and questions.",
-    banner: "linear-gradient(120deg, #4f2a00, #ff6a00)",
-    rules: ["Be respectful", "No spam", "Use clear titles"],
-    tags: ["Campus", "Announcements"],
-    privacy: "public",
-  },
-  {
-    id: "coding",
-    name: "Coding",
-    icon: "C",
-    summary: "Debug help, hackathon prep, projects, and internship tips.",
-    banner: "linear-gradient(120deg, #032744, #0088ff)",
-    rules: ["Share context in questions", "No plagiarism", "Use code blocks"],
-    tags: ["Programming", "Hackathons"],
-    privacy: "public",
-  },
-  {
-    id: "study",
-    name: "Study",
-    icon: "S",
-    summary: "Daily accountability, exam prep, and study-room coordination.",
-    banner: "linear-gradient(120deg, #124107, #39cc00)",
-    rules: ["No cheating discussions", "Stay on-topic", "Encourage others"],
-    tags: ["Productivity", "Exams"],
-    privacy: "public",
-  },
-];
+const defaultCommunities: Community[] = [];
 
 function privacyLabel(privacy?: PrivacyType) {
   if (privacy === "private") return "Private";
@@ -116,7 +85,7 @@ export default function CommunitiesPage() {
   const [communities, setCommunities] = useState<Community[]>(defaultCommunities);
   const [joined, setJoined] = useState<Record<string, boolean>>({});
   const [currentUserId, setCurrentUserId] = useState<string>("");
-  const [selected, setSelected] = useState<string>("general");
+  const [selected, setSelected] = useState<string>("");
   const [posts, setPosts] = useState<Post[]>([]);
   const [usersById, setUsersById] = useState<Record<string, UserLite>>({});
   const [tab, setTab] = useState<CommunityTab>("posts");
@@ -168,7 +137,6 @@ export default function CommunitiesPage() {
 
         // Merge by id so backend values override local defaults when present.
         const merged = new Map<string, Community>();
-        defaultCommunities.forEach((community) => merged.set(community.id, community));
         remote.forEach((community) => {
           const base = merged.get(community.id) ?? { id: community.id } as Community;
           const memberIds = Array.isArray(community.memberIds) ? community.memberIds : base.memberIds ?? [];
@@ -441,7 +409,26 @@ export default function CommunitiesPage() {
     }
   };
 
-  if (!selectedCommunity) return null;
+  if (!selectedCommunity) {
+    return (
+      <div className="min-h-screen bg-[#0f0f0f] text-white">
+        <Navbar />
+        <main className="mx-auto w-full max-w-7xl px-4 py-6">
+          <div className="rounded-2xl border border-[#2f2f2f] bg-[#141414] p-6">
+            <h1 className="text-xl font-bold text-[#ff8c42]">Communities</h1>
+            <p className="mt-2 text-sm text-gray-400">No communities yet. Create your first community.</p>
+            <button
+              type="button"
+              onClick={() => router.push("/communities/create")}
+              className="mt-4 rounded-xl bg-[#ff6a00] px-4 py-2 text-sm font-semibold text-white"
+            >
+              Create Community
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0f0f0f] text-white">
