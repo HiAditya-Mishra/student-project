@@ -6,15 +6,18 @@ import { auth, db } from "@/lib/firebase";
 import { normalizeHandle, resolveAvatar } from "@/lib/profile";
 import { getMentionContext, insertMention, MentionContext } from "@/lib/mentions";
 import { rewardPostCreate } from "@/lib/rewards";
+import { useRouter } from "next/navigation";
 
 type CreatePostProps = {
   mode?: "full" | "compact";
 };
 
 export default function CreatePost({ mode = "full" }: CreatePostProps) {
+  const router = useRouter();
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  const [community, setCommunity] = useState("general");
+  const [community, setCommunity] = useState("");
+  const [communityOptions, setCommunityOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [loading, setLoading] = useState(false);
   const [mentionCandidates, setMentionCandidates] = useState<
     Array<{ id: string; nickname: string; handle: string; avatar: string }>
@@ -63,6 +66,33 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "communities"),
+      (snapshot) => {
+        const next = snapshot.docs.map((docSnapshot) => {
+          const data = docSnapshot.data() as { name?: string };
+          return {
+            id: docSnapshot.id,
+            name: (data.name || docSnapshot.id).trim(),
+          };
+        });
+        setCommunityOptions(next);
+        setCommunity((prev) => {
+          if (prev && next.some((item) => item.id === prev)) return prev;
+          return next[0]?.id ?? "";
+        });
+      },
+      (error) => {
+        console.error(error);
+        setCommunityOptions([]);
+        setCommunity("");
+      },
+    );
+
+    return () => unsubscribe();
+  }, []);
+
   const mentionOptions = useMemo(() => {
     if (!mentionContext) return [];
     const token = mentionContext.query.trim();
@@ -100,6 +130,10 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
 
     if (!title.trim() || !content.trim()) {
       alert("Fill all fields");
+      return;
+    }
+    if (!community.trim()) {
+      alert("Please choose a community.");
       return;
     }
 
@@ -164,7 +198,10 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
 
       setTitle("");
       setContent("");
-      setCommunity("general");
+      setCommunity((prev) => {
+        if (prev && communityOptions.some((item) => item.id === prev)) return prev;
+        return communityOptions[0]?.id ?? "";
+      });
       setImageDataUrl("");
       setImageUploadError(null);
     } catch (error) {
@@ -301,24 +338,40 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
           <select
             value={community}
             onChange={(e) => setCommunity(e.target.value)}
+            disabled={!communityOptions.length}
             className="flex-1 rounded-xl border border-[#313131] bg-[#0f0f0f] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
           >
-            <option value="general">General</option>
-            <option value="coding">Coding & Tech</option>
-            <option value="study">Study Rooms</option>
-            <option value="college-life">College Life</option>
-            <option value="startups">Startups</option>
-            <option value="mental-health">Mental Health</option>
+            {communityOptions.length ? (
+              communityOptions.map((communityOption) => (
+                <option key={communityOption.id} value={communityOption.id}>
+                  {communityOption.name}
+                </option>
+              ))
+            ) : (
+              <option value="">No communities available</option>
+            )}
           </select>
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !communityOptions.length}
             className="rounded-xl bg-[#ff6a00] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#ff8c42] disabled:opacity-60"
           >
             {loading ? "Posting..." : isCompact ? "Post" : "Create Post"}
           </button>
         </div>
+        {!communityOptions.length ? (
+          <div className="flex items-center justify-between rounded-xl border border-[#2d2d2d] bg-[#101010] px-3 py-2 text-xs text-gray-400">
+            <span>Create a community first to post.</span>
+            <button
+              type="button"
+              onClick={() => router.push("/communities/create")}
+              className="rounded-md border border-[#ff6a00] px-2 py-1 text-[#ff8c42] hover:bg-[#1f120a]"
+            >
+              Create Community
+            </button>
+          </div>
+        ) : null}
       </form>
     </div>
   );
