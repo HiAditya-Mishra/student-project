@@ -11,7 +11,6 @@ const links = [
   { label: "Study Rooms", href: "/study-rooms" },
   { label: "Messages", href: "/messages" },
   { label: "Collab", href: "/collab" },
-  { label: "Vent", href: "/vent" },
   { label: "Profile", href: "/profile" },
 ];
 

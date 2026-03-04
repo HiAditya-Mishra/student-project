@@ -47,11 +47,20 @@ type Community = {
 type Post = {
   id: string;
   title?: string;
+  content?: string;
+  imageUrl?: string;
   community?: string;
   likes?: number;
   authorId?: string;
   author?: string;
   createdAt?: { seconds?: number };
+};
+
+type Comment = {
+  id: string;
+  content?: string;
+  author?: string;
+  likes?: number;
 };
 
 type UserLite = {
@@ -65,8 +74,6 @@ type UserDocLite = {
   handle?: string;
   followingCommunities?: string[];
 };
-
-const defaultCommunities: Community[] = [];
 
 function privacyLabel(privacy?: PrivacyType) {
   if (privacy === "private") return "Private";
@@ -82,7 +89,7 @@ function privacyIcon(privacy?: PrivacyType) {
 
 export default function CommunitiesPage() {
   const router = useRouter();
-  const [communities, setCommunities] = useState<Community[]>(defaultCommunities);
+  const [communities, setCommunities] = useState<Community[]>([]);
   const [joined, setJoined] = useState<Record<string, boolean>>({});
   const [currentUserId, setCurrentUserId] = useState<string>("");
   const [selected, setSelected] = useState<string>("");
@@ -93,6 +100,8 @@ export default function CommunitiesPage() {
   const [rulesExpanded, setRulesExpanded] = useState(false);
   const [communityError, setCommunityError] = useState<string | null>(null);
   const [joinBusy, setJoinBusy] = useState(false);
+  const [expandedPost, setExpandedPost] = useState<Post | null>(null);
+  const [expandedPostComments, setExpandedPostComments] = useState<Comment[]>([]);
 
   useEffect(() => {
     let profileUnsub: (() => void) | null = null;
@@ -135,10 +144,9 @@ export default function CommunitiesPage() {
           ...(docSnapshot.data() as Omit<Community, "id">),
         }));
 
-        // Merge by id so backend values override local defaults when present.
         const merged = new Map<string, Community>();
         remote.forEach((community) => {
-          const base = merged.get(community.id) ?? { id: community.id } as Community;
+          const base = merged.get(community.id) ?? ({ id: community.id } as Community);
           const memberIds = Array.isArray(community.memberIds) ? community.memberIds : base.memberIds ?? [];
           const onlineMemberIds = Array.isArray(community.onlineMemberIds)
             ? community.onlineMemberIds
@@ -234,7 +242,6 @@ export default function CommunitiesPage() {
       if (post.authorId) {
         statsByCommunity[communityId].creators.add(post.authorId);
         const age = now - (post.createdAt?.seconds ?? 0);
-        // "Online" proxy: users active in this community in the last 30 minutes.
         if (age <= 30 * 60) {
           statsByCommunity[communityId].onlineCreators.add(post.authorId);
         }
@@ -252,9 +259,17 @@ export default function CommunitiesPage() {
       return items.sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0));
     }
     if (sortMode === "rising") {
-      return items.sort((a, b) => ((b.likes ?? 0) - (a.likes ?? 0)) + ((b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)) / 3600);
+      return items.sort(
+        (a, b) =>
+          (b.likes ?? 0) -
+          (a.likes ?? 0) +
+          ((b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)) / 3600,
+      );
     }
-    return items.sort((a, b) => ((b.likes ?? 0) * 2 + (b.createdAt?.seconds ?? 0) / 3600) - ((a.likes ?? 0) * 2 + (a.createdAt?.seconds ?? 0) / 3600));
+    return items.sort(
+      (a, b) =>
+        (b.likes ?? 0) * 2 + (b.createdAt?.seconds ?? 0) / 3600 - ((a.likes ?? 0) * 2 + (a.createdAt?.seconds ?? 0) / 3600),
+    );
   }, [filteredCommunityPosts, sortMode]);
 
   const trendingPosts = sortedPosts.slice(0, 5);
@@ -303,6 +318,32 @@ export default function CommunitiesPage() {
 
   const onlineMembers = memberDirectory.filter((member) => member.online);
 
+  useEffect(() => {
+    if (!expandedPost?.id) {
+      setExpandedPostComments([]);
+      return;
+    }
+
+    const commentsQuery = query(collection(db, "posts", expandedPost.id, "comments"), orderBy("createdAt", "asc"));
+    const unsubscribe = onSnapshot(
+      commentsQuery,
+      (snapshot) => {
+        setExpandedPostComments(
+          snapshot.docs.map((docSnapshot) => ({
+            id: docSnapshot.id,
+            ...(docSnapshot.data() as Omit<Comment, "id">),
+          })),
+        );
+      },
+      (error) => {
+        console.error(error);
+        setExpandedPostComments([]);
+      },
+    );
+
+    return () => unsubscribe();
+  }, [expandedPost?.id]);
+
   const toggleJoin = async () => {
     if (!currentUserId || !selectedCommunity) {
       alert("Please login first.");
@@ -318,7 +359,6 @@ export default function CommunitiesPage() {
       await runTransaction(db, async (tx) => {
         const [communitySnap, userSnap] = await Promise.all([tx.get(communityRef), tx.get(userRef)]);
 
-        const fallback = defaultCommunities.find((community) => community.id === selectedCommunity.id);
         const raw = (communitySnap.exists() ? communitySnap.data() : {}) as Partial<Community>;
         const currentMemberIds = Array.isArray(raw.memberIds) ? raw.memberIds : [];
         const currentOnlineIds = Array.isArray(raw.onlineMemberIds) ? raw.onlineMemberIds : [];
@@ -330,26 +370,6 @@ export default function CommunitiesPage() {
         const nextOnlineIds = currentlyJoined
           ? currentOnlineIds.filter((id) => id !== currentUserId)
           : Array.from(new Set([...currentOnlineIds, currentUserId]));
-
-        if (!communitySnap.exists() && fallback) {
-          tx.set(
-            communityRef,
-            {
-              name: fallback.name,
-              icon: fallback.icon,
-              banner: fallback.banner,
-              summary: fallback.summary,
-              rules: fallback.rules,
-              tags: fallback.tags,
-              privacy: fallback.privacy,
-              events: fallback.events ?? [],
-              modIds: fallback.modIds ?? [],
-              bannedUserIds: fallback.bannedUserIds ?? [],
-              createdAt: serverTimestamp(),
-            },
-            { merge: true },
-          );
-        }
 
         tx.set(
           communityRef,
@@ -397,6 +417,10 @@ export default function CommunitiesPage() {
 
   const handleBanUser = async (userId?: string) => {
     if (!isMod || !userId || !selectedCommunity) return;
+    if (userId === currentUserId) {
+      alert("You cannot ban yourself.");
+      return;
+    }
     try {
       await updateDoc(doc(db, "communities", selectedCommunity.id), {
         bannedUserIds: arrayUnion(userId),
@@ -453,16 +477,14 @@ export default function CommunitiesPage() {
                     : "border-[#2f2f2f] bg-[#101010] hover:border-[#ff6a00]"
                 }`}
               >
-                    <p className="text-sm font-semibold">{community.name}</p>
-                    <p className="mt-1 text-[11px] text-gray-400">
-                      {privacyIcon(community.privacy)} {privacyLabel(community.privacy)}
-                    </p>
-                    <p className="mt-1 text-[11px] text-gray-500">
-                      Members: {getMembersCount(community)}
-                    </p>
-                  </button>
-                ))}
-              </div>
+                <p className="text-sm font-semibold">{community.name}</p>
+                <p className="mt-1 text-[11px] text-gray-400">
+                  {privacyIcon(community.privacy)} {privacyLabel(community.privacy)}
+                </p>
+                <p className="mt-1 text-[11px] text-gray-500">Members: {getMembersCount(community)}</p>
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             onClick={() => router.push("/communities/create")}
@@ -483,9 +505,7 @@ export default function CommunitiesPage() {
                   <div>
                     <h1 className="text-xl font-bold">{selectedCommunity.name}</h1>
                     <p className="text-xs text-white/80">
-                      {getMembersCount(selectedCommunity)} members
-                      {" | "}
-                      {getOnlineCount(selectedCommunity)} online
+                      {getMembersCount(selectedCommunity)} members | {getOnlineCount(selectedCommunity)} online
                     </p>
                   </div>
                 </div>
@@ -565,22 +585,30 @@ export default function CommunitiesPage() {
                         <p className="font-semibold">{post.title || "Untitled Post"}</p>
                         <p className="text-xs text-gray-400">{post.author || "Aspirant"} | {post.likes ?? 0} upvotes</p>
                       </div>
-                      {isMod ? (
-                        <div className="flex gap-2">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setExpandedPost(post)}
+                          className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-gray-200 hover:border-[#ff6a00]"
+                        >
+                          Open
+                        </button>
+                        {isMod ? (
                           <button
                             onClick={() => void handleDeletePost(post.id)}
                             className="rounded border border-red-700 px-2 py-1 text-[11px] text-red-300"
                           >
                             Delete
                           </button>
+                        ) : null}
+                        {isMod && post.authorId && post.authorId !== currentUserId ? (
                           <button
                             onClick={() => void handleBanUser(post.authorId)}
                             className="rounded border border-yellow-700 px-2 py-1 text-[11px] text-yellow-300"
                           >
                             Ban
                           </button>
-                        </div>
-                      ) : null}
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 ))
@@ -594,8 +622,18 @@ export default function CommunitiesPage() {
             <div className="space-y-2">
               {trendingPosts.map((post) => (
                 <div key={post.id} className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-3">
-                  <p className="font-semibold">{post.title || "Untitled Post"}</p>
-                  <p className="text-xs text-gray-400">{post.likes ?? 0} upvotes</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-semibold">{post.title || "Untitled Post"}</p>
+                      <p className="text-xs text-gray-400">{post.likes ?? 0} upvotes</p>
+                    </div>
+                    <button
+                      onClick={() => setExpandedPost(post)}
+                      className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-gray-200 hover:border-[#ff6a00]"
+                    >
+                      Open
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -610,9 +648,7 @@ export default function CommunitiesPage() {
                   </div>
                 ))
               ) : (
-                <p className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-4 text-sm text-gray-500">
-                  No events yet.
-                </p>
+                <p className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-4 text-sm text-gray-500">No events yet.</p>
               )}
             </div>
           ) : null}
@@ -640,9 +676,7 @@ export default function CommunitiesPage() {
                 memberDirectory.map((member) => (
                   <div key={member.id} className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-3">
                     <p className="font-semibold">{member.name}</p>
-                    <p className="text-xs text-gray-400">
-                      @{member.handle} | {member.online ? "Online" : "Offline"}
-                    </p>
+                    <p className="text-xs text-gray-400">@{member.handle} | {member.online ? "Online" : "Offline"}</p>
                   </div>
                 ))
               ) : (
@@ -654,9 +688,7 @@ export default function CommunitiesPage() {
                 ))
               )}
               {!memberDirectory.length && !memberRows.length ? (
-                <p className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-4 text-sm text-gray-500">
-                  No members yet.
-                </p>
+                <p className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-4 text-sm text-gray-500">No members yet.</p>
               ) : null}
             </div>
           ) : null}
@@ -673,6 +705,51 @@ export default function CommunitiesPage() {
           ) : null}
         </section>
       </main>
+
+      {expandedPost ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-[#2f2f2f] bg-[#141414] p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-lg font-semibold">{expandedPost.title || "Untitled Post"}</p>
+                <p className="text-xs text-gray-400">{expandedPost.author || "Aspirant"} | {expandedPost.likes ?? 0} upvotes</p>
+              </div>
+              <button
+                onClick={() => setExpandedPost(null)}
+                className="rounded-lg border border-[#2f2f2f] px-3 py-1 text-xs text-gray-300 hover:border-[#ff6a00]"
+              >
+                Close
+              </button>
+            </div>
+
+            <p className="mt-3 whitespace-pre-wrap text-sm text-gray-200">{expandedPost.content || "No content."}</p>
+            {expandedPost.imageUrl ? (
+              <img
+                src={expandedPost.imageUrl}
+                alt={expandedPost.title || "Post image"}
+                className="mt-3 max-h-[380px] w-full rounded-xl border border-[#2f2f2f] object-cover"
+              />
+            ) : null}
+
+            <div className="mt-4">
+              <p className="text-sm font-semibold text-[#ff8c42]">Comments ({expandedPostComments.length})</p>
+              <div className="mt-2 space-y-2">
+                {expandedPostComments.length ? (
+                  expandedPostComments.map((comment) => (
+                    <div key={comment.id} className="rounded-xl border border-[#2f2f2f] bg-[#101010] p-3">
+                      <p className="text-xs text-[#ff8c42]">{comment.author || "Aspirant"}</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-gray-200">{comment.content || "..."}</p>
+                      <p className="mt-1 text-[11px] text-gray-500">{comment.likes ?? 0} upvotes</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="rounded-xl border border-[#2f2f2f] bg-[#101010] p-3 text-sm text-gray-500">No comments yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
