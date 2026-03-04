@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { User, onAuthStateChanged, signOut } from "firebase/auth";
+import { User, onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 
 const links = [
@@ -88,9 +88,9 @@ export default function Navbar() {
 
           {user ? (
             <button
-              onClick={() => void signOut(auth)}
+              onClick={() => router.push("/profile")}
               className="h-9 w-9 rounded-full border border-[#ff8c42] bg-[#1a1a1a] text-sm"
-              title="Logout"
+              title="Profile"
             >
               U
             </button>

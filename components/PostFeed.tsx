@@ -22,6 +22,7 @@ interface Post {
   id: string;
   title: string;
   content: string;
+  imageUrl?: string;
   community: string;
   author: string;
   authorId?: string;
@@ -403,6 +404,13 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
             {renderTextWithMentions(post.title)}
           </h3>
           <p className="mt-2 text-sm text-gray-300 whitespace-pre-wrap break-words">{renderTextWithMentions(post.content)}</p>
+          {post.imageUrl ? (
+            <img
+              src={post.imageUrl}
+              alt={post.title || "Post image"}
+              className="mt-3 max-h-[380px] w-full rounded-xl border border-[#2f2f2f] bg-[#0f0f0f] object-cover"
+            />
+          ) : null}
 
           <div className="mt-4 flex items-center gap-3 text-xs text-gray-300">
             <button

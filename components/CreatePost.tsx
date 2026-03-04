@@ -18,6 +18,8 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
   const [users, setUsers] = useState<Array<UserProfileDoc & { id: string }>>([]);
   const [mentionContext, setMentionContext] = useState<MentionContext | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const [imageDataUrl, setImageDataUrl] = useState("");
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
   const contentRef = useRef<HTMLTextAreaElement | null>(null);
 
   const isCompact = mode === "compact";
@@ -126,6 +128,7 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
         title: title.trim(),
         content: content.trim(),
         community,
+        imageUrl: imageDataUrl.trim(),
         author: authorName,
         authorId: auth.currentUser.uid,
         authorHandle,
@@ -139,6 +142,8 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
       setTitle("");
       setContent("");
       setCommunity("general");
+      setImageDataUrl("");
+      setImageUploadError(null);
     } catch (error) {
       console.error(error);
       const message =
@@ -149,6 +154,32 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const onPostImageChange = (file: File | null) => {
+    if (!file) {
+      setImageDataUrl("");
+      setImageUploadError(null);
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setImageUploadError("Please upload an image file.");
+      return;
+    }
+
+    if (file.size > 350 * 1024) {
+      setImageUploadError("Image must be under 350KB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") return;
+      setImageDataUrl(reader.result);
+      setImageUploadError(null);
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -228,6 +259,20 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
             ))}
           </div>
         ) : null}
+
+        <div className="space-y-2">
+          <label className="block text-xs text-gray-400">Post image (optional)</label>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => onPostImageChange(e.target.files?.[0] ?? null)}
+            className="w-full rounded-xl border border-[#313131] bg-[#0f0f0f] px-3 py-2 text-xs outline-none file:mr-2 file:rounded file:border-0 file:bg-[#ff6a00] file:px-2 file:py-1 file:text-white"
+          />
+          {imageUploadError ? <p className="text-xs text-red-300">{imageUploadError}</p> : null}
+          {imageDataUrl ? (
+            <img src={imageDataUrl} alt="Post preview" className="max-h-56 w-full rounded-xl border border-[#2f2f2f] object-cover" />
+          ) : null}
+        </div>
 
         <div className="flex gap-2">
           <select

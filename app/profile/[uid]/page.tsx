@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { doc, getDoc } from "firebase/firestore";
+import { collection, onSnapshot } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import Navbar from "@/components/navbar";
 import { resolveAvatar, UserProfileDoc } from "@/lib/profile";
@@ -17,46 +17,54 @@ export default function PublicProfilePage() {
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const uid = Array.isArray(params?.uid) ? params.uid[0] : params?.uid;
 
   useEffect(() => {
-    const uid = params?.uid;
     if (!uid) {
       setError("Profile not found.");
       setLoading(false);
       return;
     }
 
-    const run = async () => {
-      try {
-        const snapshot = await getDoc(doc(db, "users", uid));
-        if (!snapshot.exists()) {
+    const unsubscribe = onSnapshot(
+      collection(db, "users"),
+      (snapshot) => {
+        const matching = snapshot.docs.find((docSnapshot) => docSnapshot.id === uid);
+        if (!matching) {
           setError("Profile not found.");
           setProfile(null);
+          setLoading(false);
           return;
         }
 
-        const data = snapshot.data() as PublicProfile;
+        const data = matching.data() as PublicProfile;
         const isOwner = auth.currentUser?.uid === uid;
         if (data.publicProfile === false && !isOwner) {
           setError("This profile is private.");
           setProfile(null);
+          setLoading(false);
           return;
         }
 
         setError(null);
         setProfile(data);
-      } catch (e) {
-        console.error(e);
-        setError("Could not load this profile.");
-      } finally {
         setLoading(false);
-      }
-    };
+      },
+      (snapshotError) => {
+        console.error(snapshotError);
+        setError(
+          snapshotError.code === "permission-denied"
+            ? "Profile access is blocked by Firestore rules."
+            : "Could not load this profile.",
+        );
+        setLoading(false);
+      },
+    );
 
-    void run();
-  }, [params?.uid]);
+    return () => unsubscribe();
+  }, [uid]);
 
-  const avatar = useMemo(() => resolveAvatar(profile, params?.uid), [profile, params?.uid]);
+  const avatar = useMemo(() => resolveAvatar(profile, uid), [profile, uid]);
 
   return (
     <div className="min-h-screen bg-[#0f0f0f] text-white">
