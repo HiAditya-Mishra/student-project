@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   addDoc,
   collection,
@@ -14,6 +15,8 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import { normalizeHandle, resolveAvatar, UserProfileDoc } from "@/lib/profile";
+import { getMentionContext, insertMention, MentionContext } from "@/lib/mentions";
 
 interface Post {
   id: string;
@@ -22,6 +25,9 @@ interface Post {
   community: string;
   author: string;
   authorId?: string;
+  authorHandle?: string;
+  authorAvatarUrl?: string;
+  mentions?: string[];
   likes: number;
   likedBy?: string[];
 }
@@ -31,11 +37,11 @@ interface Comment {
   content: string;
   author: string;
   authorId?: string;
+  authorHandle?: string;
+  authorAvatarUrl?: string;
 }
 
-function avatarFromName(name: string) {
-  return `https://api.dicebear.com/9.x/thumbs/svg?seed=${encodeURIComponent(name)}`;
-}
+type UserLite = UserProfileDoc & { id: string };
 
 type PostFeedProps = {
   searchTerm?: string;
@@ -43,17 +49,37 @@ type PostFeedProps = {
 };
 
 export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeedProps) {
+  const router = useRouter();
   const [posts, setPosts] = useState<Post[]>([]);
+  const [usersById, setUsersById] = useState<Record<string, UserLite>>({});
+  const [usersByHandle, setUsersByHandle] = useState<Record<string, UserLite>>({});
   const [feedError, setFeedError] = useState<string | null>(null);
   const [updatingPostId, setUpdatingPostId] = useState<string | null>(null);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
   const [openComments, setOpenComments] = useState<Record<string, boolean>>({});
   const [commentsByPost, setCommentsByPost] = useState<Record<string, Comment[]>>({});
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [commentMentionContext, setCommentMentionContext] = useState<Record<string, MentionContext | null>>({});
+  const [commentMentionIndex, setCommentMentionIndex] = useState<Record<string, number>>({});
   const [submittingCommentPostId, setSubmittingCommentPostId] = useState<string | null>(null);
   const commentListeners = useRef<Record<string, () => void>>({});
+  const commentInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
+    const unsubscribeUsers = onSnapshot(collection(db, "users"), (snapshot) => {
+      const nextById: Record<string, UserLite> = {};
+      const nextByHandle: Record<string, UserLite> = {};
+      snapshot.forEach((docSnapshot) => {
+        const data = docSnapshot.data() as UserProfileDoc;
+        const userLite: UserLite = { ...data, id: docSnapshot.id };
+        nextById[docSnapshot.id] = userLite;
+        const handle = normalizeHandle(data.handle || data.nickname || "");
+        nextByHandle[handle] = userLite;
+      });
+      setUsersById(nextById);
+      setUsersByHandle(nextByHandle);
+    });
+
     const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
 
     const unsubscribe = onSnapshot(
@@ -76,7 +102,10 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
       },
     );
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      unsubscribeUsers();
+    };
   }, []);
 
   useEffect(() => {
@@ -173,13 +202,16 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
     try {
       setSubmittingCommentPostId(postId);
       const profileSnapshot = await getDoc(doc(db, "users", user.uid));
-      const nickname = profileSnapshot.exists()
-        ? ((profileSnapshot.data() as { nickname?: string }).nickname ?? "").trim()
-        : "";
+      const profile = profileSnapshot.exists()
+        ? profileSnapshot.data() as { nickname?: string; handle?: string; avatarUrl?: string; avatarSeed?: string }
+        : {};
+      const nickname = (profile.nickname ?? "").trim();
       await addDoc(collection(db, "posts", postId, "comments"), {
         content,
         author: nickname || user.displayName || "Aspirant",
         authorId: user.uid,
+        authorHandle: normalizeHandle(profile.handle || nickname || user.displayName || "Aspirant"),
+        authorAvatarUrl: resolveAvatar(profile, user.uid),
         createdAt: serverTimestamp(),
       });
 
@@ -244,13 +276,98 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const visiblePosts = posts.filter((post) => {
     if (!normalizedSearch) return true;
+    const normalizedAuthorHandle = (post.authorHandle || "").toLowerCase();
     return (
       post.title?.toLowerCase().includes(normalizedSearch) ||
       post.content?.toLowerCase().includes(normalizedSearch) ||
       post.author?.toLowerCase().includes(normalizedSearch) ||
+      normalizedAuthorHandle.includes(normalizedSearch.replace("@", "")) ||
+      (post.mentions ?? []).some((mention) => mention.includes(normalizedSearch.replace("@", ""))) ||
       post.community?.toLowerCase().includes(normalizedSearch)
     );
   });
+
+  const openProfile = (uid?: string) => {
+    if (!uid) return;
+    router.push(`/profile/${uid}`);
+  };
+
+  const renderTextWithMentions = (text: string) => {
+    const parts = text.split(/(@[a-zA-Z0-9._-]+)/g);
+    return parts.map((part, index) => {
+      const match = part.match(/^@([a-zA-Z0-9._-]+)$/);
+      if (!match) {
+        return <span key={`${part}-${index}`}>{part}</span>;
+      }
+
+      const handle = normalizeHandle(match[1]);
+      const mentionUser = usersByHandle[handle];
+      const clickable = Boolean(mentionUser?.id);
+      if (!clickable) {
+        return (
+          <span key={`${part}-${index}`} className="font-medium text-[#ffb380]">
+            @{handle}
+          </span>
+        );
+      }
+
+      return (
+        <button
+          key={`${part}-${index}`}
+          type="button"
+          onClick={() => openProfile(mentionUser.id)}
+          className="font-semibold text-[#ff8c42] hover:underline"
+        >
+          @{handle}
+        </button>
+      );
+    });
+  };
+
+  const getCommentMentionOptions = (postId: string) => {
+    const context = commentMentionContext[postId];
+    if (!context) return [];
+
+    const token = context.query.trim();
+    return Object.values(usersById)
+      .filter((user) => user.publicProfile !== false)
+      .map((user) => ({
+        id: user.id,
+        nickname: user.nickname || "Campus User",
+        handle: normalizeHandle(user.handle || user.nickname || ""),
+        avatar: resolveAvatar(user, user.id),
+      }))
+      .filter((user) => {
+        if (!token) return true;
+        return user.handle.includes(token) || user.nickname.toLowerCase().includes(token);
+      })
+      .slice(0, 6);
+  };
+
+  const setCommentDraftWithMention = (postId: string, nextText: string, caret: number) => {
+    setCommentDrafts((prev) => ({ ...prev, [postId]: nextText }));
+    setCommentMentionContext((prev) => ({ ...prev, [postId]: getMentionContext(nextText, caret) }));
+    setCommentMentionIndex((prev) => ({ ...prev, [postId]: 0 }));
+  };
+
+  const applyCommentMention = (postId: string, selectedHandle: string) => {
+    const context = commentMentionContext[postId];
+    if (!context) return;
+
+    const draft = commentDrafts[postId] ?? "";
+    const { nextText, caretIndex } = insertMention(draft, context, selectedHandle);
+
+    setCommentDrafts((prev) => ({ ...prev, [postId]: nextText }));
+    setCommentMentionContext((prev) => ({ ...prev, [postId]: null }));
+    setCommentMentionIndex((prev) => ({ ...prev, [postId]: 0 }));
+
+    requestAnimationFrame(() => {
+      const input = commentInputRefs.current[postId];
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(caretIndex, caretIndex);
+    });
+  };
 
   return (
     <div className="space-y-3">
@@ -262,24 +379,30 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
 
       <div className="grid gap-4 md:grid-cols-2">
       {visiblePosts.map((post) => (
-        <article
-          key={post.id}
-          className="rounded-2xl border border-[#ff6a00] bg-[#141414] p-4 shadow-[0_0_14px_rgba(255,106,0,0.2)]"
-        >
+        <article key={post.id} className="rounded-2xl border border-[#ff6a00] bg-[#141414] p-4 shadow-[0_0_14px_rgba(255,106,0,0.2)]">
           <div className="mb-3 flex items-center gap-2">
             <img
-              src={avatarFromName(post.author || "user")}
+              src={post.authorAvatarUrl || resolveAvatar(usersById[post.authorId ?? ""], post.authorId || post.author || "user")}
               alt={post.author}
               className="h-8 w-8 rounded-full border border-[#ff8c42]"
             />
             <div>
-              <p className="text-sm font-semibold text-[#ff8c42]">{post.author || "Aspirant"}</p>
+              <button
+                type="button"
+                onClick={() => openProfile(post.authorId)}
+                className="text-left text-sm font-semibold text-[#ff8c42] hover:underline"
+              >
+                {post.author || "Aspirant"}
+                {post.authorHandle ? <span className="ml-1 text-xs text-gray-400">@{post.authorHandle}</span> : null}
+              </button>
               <p className="text-xs text-gray-500">{post.community || "general"}</p>
             </div>
           </div>
 
-          <h3 className="text-xl font-semibold leading-tight text-white">{post.title}</h3>
-          <p className="mt-2 text-sm text-gray-300">{post.content}</p>
+          <h3 className="text-xl font-semibold leading-tight text-white whitespace-pre-wrap break-words">
+            {renderTextWithMentions(post.title)}
+          </h3>
+          <p className="mt-2 text-sm text-gray-300 whitespace-pre-wrap break-words">{renderTextWithMentions(post.content)}</p>
 
           <div className="mt-4 flex items-center gap-3 text-xs text-gray-300">
             <button
@@ -327,8 +450,15 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
                 {(commentsByPost[post.id] ?? []).length ? (
                   commentsByPost[post.id].map((comment) => (
                     <div key={comment.id} className="rounded-lg border border-[#222] bg-[#121212] px-3 py-2">
-                      <p className="text-xs font-semibold text-[#ff8c42]">{comment.author || "Aspirant"}</p>
-                      <p className="mt-1 text-sm text-gray-300">{comment.content}</p>
+                      <button
+                        type="button"
+                        onClick={() => openProfile(comment.authorId)}
+                        className="text-xs font-semibold text-[#ff8c42] hover:underline"
+                      >
+                        {comment.author || "Aspirant"}
+                        {comment.authorHandle ? <span className="ml-1 text-[11px] text-gray-400">@{comment.authorHandle}</span> : null}
+                      </button>
+                      <p className="mt-1 text-sm text-gray-300 whitespace-pre-wrap break-words">{renderTextWithMentions(comment.content)}</p>
                     </div>
                   ))
                 ) : (
@@ -338,10 +468,45 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
 
               <div className="flex gap-2">
                 <input
+                  ref={(node) => {
+                    commentInputRefs.current[post.id] = node;
+                  }}
                   value={commentDrafts[post.id] ?? ""}
                   onChange={(e) =>
-                    setCommentDrafts((prev) => ({ ...prev, [post.id]: e.target.value }))
+                    setCommentDraftWithMention(post.id, e.target.value, e.target.selectionStart ?? e.target.value.length)
                   }
+                  onKeyDown={(e) => {
+                    const options = getCommentMentionOptions(post.id);
+                    const context = commentMentionContext[post.id];
+                    if (!context || !options.length) return;
+
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setCommentMentionIndex((prev) => ({
+                        ...prev,
+                        [post.id]: ((prev[post.id] ?? 0) + 1) % options.length,
+                      }));
+                      return;
+                    }
+                    if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setCommentMentionIndex((prev) => ({
+                        ...prev,
+                        [post.id]: ((prev[post.id] ?? 0) - 1 + options.length) % options.length,
+                      }));
+                      return;
+                    }
+                    if (e.key === "Enter" || e.key === "Tab") {
+                      e.preventDefault();
+                      const selected = options[commentMentionIndex[post.id] ?? 0];
+                      if (selected) applyCommentMention(post.id, selected.handle);
+                      return;
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setCommentMentionContext((prev) => ({ ...prev, [post.id]: null }));
+                    }
+                  }}
                   placeholder="Write a comment..."
                   className="flex-1 rounded-lg border border-[#2f2f2f] bg-[#141414] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
                 />
@@ -353,6 +518,27 @@ export default function PostFeed({ searchTerm = "", readOnly = false }: PostFeed
                   {submittingCommentPostId === post.id ? "Posting..." : "Post"}
                 </button>
               </div>
+              {commentMentionContext[post.id] && getCommentMentionOptions(post.id).length ? (
+                <div className="rounded-lg border border-[#2f2f2f] bg-[#121212] p-1">
+                  {getCommentMentionOptions(post.id).map((user, index) => (
+                    <button
+                      key={`${post.id}-${user.id}`}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        applyCommentMention(post.id, user.handle);
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left ${
+                        index === (commentMentionIndex[post.id] ?? 0) ? "bg-[#25160d]" : "hover:bg-[#1c1c1c]"
+                      }`}
+                    >
+                      <img src={user.avatar} alt={user.nickname} className="h-6 w-6 rounded-full border border-[#ff8c42]" />
+                      <span className="text-sm text-white">{user.nickname}</span>
+                      <span className="text-xs text-gray-400">@{user.handle}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </article>

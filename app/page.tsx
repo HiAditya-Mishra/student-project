@@ -1,12 +1,28 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
 export default function Home() {
   const router = useRouter();
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setCheckingAuth(false);
+        return;
+      }
+
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      router.replace(userDoc.exists() ? "/feed" : "/profile-setup");
+    });
+
+    return () => unsubscribe();
+  }, [router]);
 
   const handleLogin = async () => {
     try {
@@ -25,6 +41,10 @@ export default function Home() {
       alert("Login failed. Please try again.");
     }
   };
+
+  if (checkingAuth) {
+    return <div className="flex h-screen items-center justify-center bg-[#0f0f0f] text-gray-400">Checking login...</div>;
+  }
 
   return (
     <div className="flex h-screen items-center justify-center bg-[#0f0f0f] px-4">

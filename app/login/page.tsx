@@ -4,25 +4,49 @@ import {
   GoogleAuthProvider,
   signInWithRedirect,
   getRedirectResult,
+  onAuthStateChanged,
 } from "firebase/auth";
-import { auth } from "../lib/firebase";
-import { useEffect } from "react";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  const routeLoggedInUser = useCallback(async (uid: string) => {
+    const userDoc = await getDoc(doc(db, "users", uid));
+    router.replace(userDoc.exists() ? "/feed" : "/profile-setup");
+  }, [router]);
 
   useEffect(() => {
-    getRedirectResult(auth).then((result) => {
-      if (result?.user) {
-        router.replace("/");
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setCheckingAuth(false);
+        return;
       }
+      await routeLoggedInUser(user.uid);
     });
-  }, [router]);
+
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (result?.user) {
+          await routeLoggedInUser(result.user.uid);
+        }
+      })
+      .finally(() => setCheckingAuth(false));
+
+    return () => unsubscribe();
+  }, [routeLoggedInUser]);
 
   function login() {
     const provider = new GoogleAuthProvider();
     signInWithRedirect(auth, provider);
+  }
+
+  if (checkingAuth) {
+    return <main className="min-h-screen flex items-center justify-center bg-gray-100">Checking login...</main>;
   }
 
   return (

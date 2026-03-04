@@ -69,7 +69,7 @@ export default function Navbar() {
             className="hidden items-center rounded-full border border-[#2d2d2d] bg-[#1a1a1a] px-3 py-1.5 sm:flex"
           >
             <input
-              placeholder="Search"
+              placeholder="Search posts or @people"
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
               className="w-28 bg-transparent text-sm outline-none placeholder:text-gray-500"

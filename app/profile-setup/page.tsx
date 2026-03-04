@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import { normalizeHandle } from "@/lib/profile";
 
 export default function ProfileSetupPage() {
   const [nickname, setNickname] = useState("");
@@ -30,11 +31,13 @@ export default function ProfileSetupPage() {
         doc(db, "users", user.uid),
         {
           nickname: nickname.trim(),
+          handle: normalizeHandle(nickname),
           hobbies: hobbies.trim(),
           interests: interests.trim(),
           bio: "",
           skills: [],
           avatarSeed: user.uid,
+          avatarUrl: user.photoURL ?? "",
           publicProfile: true,
           linkedin: "",
           github: "",

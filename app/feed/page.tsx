@@ -8,13 +8,10 @@ import { onAuthStateChanged } from "firebase/auth";
 import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
 import { usePathname, useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
+import { normalizeHandle, resolveAvatar, UserProfileDoc } from "@/lib/profile";
 
-type UserProfile = {
-  nickname?: string;
-  skills?: string[];
-  avatarSeed?: string;
-  publicProfile?: boolean;
-};
+type UserProfile = UserProfileDoc;
+type UserListItem = UserProfileDoc & { id: string };
 
 type StudyRoom = {
   id: string;
@@ -28,10 +25,6 @@ type Post = {
   likes?: number;
 };
 
-function avatarUrl(seed: string) {
-  return `https://api.dicebear.com/9.x/thumbs/svg?seed=${encodeURIComponent(seed || "campus-user")}`;
-}
-
 export default function FeedPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -41,6 +34,7 @@ export default function FeedPage() {
   const [rooms, setRooms] = useState<StudyRoom[]>([]);
   const [sapphire, setSapphire] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
+  const [users, setUsers] = useState<UserListItem[]>([]);
   const [roomsError, setRoomsError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
 
@@ -130,6 +124,25 @@ export default function FeedPage() {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
+      collection(db, "users"),
+      (snapshot) => {
+        const fetchedUsers: UserListItem[] = snapshot.docs.map((docSnapshot) => ({
+          id: docSnapshot.id,
+          ...(docSnapshot.data() as UserProfileDoc),
+        }));
+        setUsers(fetchedUsers);
+      },
+      (error) => {
+        console.error(error);
+        setUsers([]);
+      },
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
       collection(db, "studyRooms"),
       (snapshot) => {
         setRoomsError(null);
@@ -160,6 +173,29 @@ export default function FeedPage() {
   const topSkills = (profile?.skills ?? []).slice(0, 4);
   const liveRoom = rooms.find((room) => (room.participants?.length ?? 0) > 0);
   const readOnlyMode = !publicMode;
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+
+  const matchedProfiles = useMemo(() => {
+    if (!normalizedSearch) return [];
+    const token = normalizedSearch.startsWith("@") ? normalizedSearch.slice(1) : normalizedSearch;
+
+    return users
+      .filter((user) => {
+        const nickname = (user.nickname || "").toLowerCase();
+        const handle = normalizeHandle(user.handle || user.nickname || "");
+        const skills = (user.skills ?? []).join(" ").toLowerCase();
+        const hobbies = (user.hobbies || "").toLowerCase();
+        const interests = (user.interests || "").toLowerCase();
+        return (
+          nickname.includes(token) ||
+          handle.includes(token) ||
+          skills.includes(token) ||
+          hobbies.includes(token) ||
+          interests.includes(token)
+        );
+      })
+      .slice(0, 8);
+  }, [normalizedSearch, users]);
 
   const handleToggleVisibility = async () => {
     const user = auth.currentUser;
@@ -201,6 +237,36 @@ export default function FeedPage() {
             {roomsError ? <p className="mt-2 text-xs text-red-300">{roomsError}</p> : null}
           </div>
 
+          {normalizedSearch ? (
+            <div className="rounded-2xl border border-[#2d2d2d] bg-[#141414] p-4">
+              <p className="text-sm font-semibold text-[#ff8c42]">Matching Profiles</p>
+              {matchedProfiles.length ? (
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {matchedProfiles.map((matched) => (
+                    <button
+                      key={matched.id}
+                      type="button"
+                      onClick={() => router.push(`/profile/${matched.id}`)}
+                      className="flex items-center gap-2 rounded-xl border border-[#2e2e2e] bg-[#111111] p-2 text-left hover:border-[#ff6a00]"
+                    >
+                      <img
+                        src={resolveAvatar(matched, matched.id)}
+                        alt={matched.nickname || "User"}
+                        className="h-10 w-10 rounded-full border border-[#ff8c42]"
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-white">{matched.nickname || "Campus User"}</p>
+                        <p className="truncate text-xs text-gray-400">@{normalizeHandle(matched.handle || matched.nickname || "")}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-gray-500">No profiles match "{searchTerm}".</p>
+              )}
+            </div>
+          ) : null}
+
           <PostFeed searchTerm={searchTerm} readOnly={readOnlyMode} />
         </section>
 
@@ -237,13 +303,13 @@ export default function FeedPage() {
 
           <div className="rounded-2xl border border-[#2f2f2f] bg-[#141414] p-4">
             <img
-              src={avatarUrl(profile?.avatarSeed || auth.currentUser?.uid || "campus-user")}
+              src={resolveAvatar(profile, auth.currentUser?.uid || "campus-user")}
               alt={displayName}
               className="mx-auto h-16 w-16 rounded-full border border-[#ff8c42] bg-[#1f1f1f]"
             />
             <h3 className="mt-3 text-center text-lg font-semibold">{displayName}</h3>
             <p className="text-center text-xs text-gray-400">
-              @{(displayName || "campus_user").toLowerCase().replace(/\s+/g, "_")}
+              @{normalizeHandle(profile?.handle || displayName || "campus_user")}
             </p>
 
             <div className="mt-4 space-y-2 text-sm">

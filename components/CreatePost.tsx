@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { addDoc, collection, doc, getDoc, serverTimestamp } from "firebase/firestore";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import { normalizeHandle, resolveAvatar, UserProfileDoc } from "@/lib/profile";
+import { getMentionContext, insertMention, MentionContext } from "@/lib/mentions";
 
 type CreatePostProps = {
   mode?: "full" | "compact";
@@ -13,8 +15,70 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
   const [content, setContent] = useState("");
   const [community, setCommunity] = useState("general");
   const [loading, setLoading] = useState(false);
+  const [users, setUsers] = useState<Array<UserProfileDoc & { id: string }>>([]);
+  const [mentionContext, setMentionContext] = useState<MentionContext | null>(null);
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const contentRef = useRef<HTMLTextAreaElement | null>(null);
 
   const isCompact = mode === "compact";
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "users"),
+      (snapshot) => {
+        const nextUsers = snapshot.docs.map((docSnapshot) => ({
+          id: docSnapshot.id,
+          ...(docSnapshot.data() as UserProfileDoc),
+        }));
+        setUsers(nextUsers);
+      },
+      (error) => {
+        console.error(error);
+        setUsers([]);
+      },
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  const mentionOptions = useMemo(() => {
+    if (!mentionContext) return [];
+    const token = mentionContext.query.trim();
+
+    return users
+      .filter((user) => user.publicProfile !== false)
+      .map((user) => ({
+        id: user.id,
+        nickname: user.nickname || "Campus User",
+        handle: normalizeHandle(user.handle || user.nickname || ""),
+        avatar: resolveAvatar(user, user.id),
+      }))
+      .filter((user) => {
+        if (!token) return true;
+        return user.handle.includes(token) || user.nickname.toLowerCase().includes(token);
+      })
+      .slice(0, 6);
+  }, [mentionContext, users]);
+
+  const syncMentionContext = (nextText: string, caret: number) => {
+    const nextMentionContext = getMentionContext(nextText, caret);
+    setMentionContext(nextMentionContext);
+    setActiveMentionIndex(0);
+  };
+
+  const applyMention = (selectedHandle: string) => {
+    if (!mentionContext) return;
+    const { nextText, caretIndex } = insertMention(content, mentionContext, selectedHandle);
+    setContent(nextText);
+    setMentionContext(null);
+    setActiveMentionIndex(0);
+
+    requestAnimationFrame(() => {
+      if (!contentRef.current) return;
+      contentRef.current.focus();
+      contentRef.current.setSelectionRange(caretIndex, caretIndex);
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +97,15 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
       setLoading(true);
       const userRef = doc(db, "users", auth.currentUser.uid);
       const userSnapshot = await getDoc(userRef);
-      const profile = userSnapshot.exists() ? userSnapshot.data() as { nickname?: string; publicProfile?: boolean } : {};
+      const profile = userSnapshot.exists()
+        ? userSnapshot.data() as {
+            nickname?: string;
+            handle?: string;
+            avatarUrl?: string;
+            avatarSeed?: string;
+            publicProfile?: boolean;
+          }
+        : {};
 
       if (profile.publicProfile === false) {
         alert("Switch to Public Profile to create posts.");
@@ -41,6 +113,14 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
       }
 
       const authorName = profile.nickname?.trim() || auth.currentUser?.displayName || "Aspirant";
+      const authorHandle = normalizeHandle(profile.handle?.trim() || profile.nickname?.trim() || authorName);
+      const authorAvatarUrl = resolveAvatar(profile, auth.currentUser.uid);
+      const mentions = Array.from(
+        new Set(
+          `${title} ${content}`
+            .match(/@([a-zA-Z0-9._-]+)/g)?.map((mention) => normalizeHandle(mention.slice(1))) ?? [],
+        ),
+      ).slice(0, 20);
 
       await addDoc(collection(db, "posts"), {
         title: title.trim(),
@@ -48,6 +128,9 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
         community,
         author: authorName,
         authorId: auth.currentUser.uid,
+        authorHandle,
+        authorAvatarUrl,
+        mentions,
         createdAt: serverTimestamp(),
         likes: 0,
         likedBy: [],
@@ -88,13 +171,63 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
         />
 
         <textarea
+          ref={contentRef}
           placeholder={isCompact ? "Add a post..." : "Write something..."}
           value={content}
-          onChange={(e) => setContent(e.target.value)}
+          onChange={(e) => {
+            const nextText = e.target.value;
+            setContent(nextText);
+            syncMentionContext(nextText, e.target.selectionStart ?? nextText.length);
+          }}
+          onKeyDown={(e) => {
+            if (!mentionContext || !mentionOptions.length) return;
+
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setActiveMentionIndex((prev) => (prev + 1) % mentionOptions.length);
+              return;
+            }
+            if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActiveMentionIndex((prev) => (prev - 1 + mentionOptions.length) % mentionOptions.length);
+              return;
+            }
+            if (e.key === "Enter" || e.key === "Tab") {
+              e.preventDefault();
+              const selected = mentionOptions[activeMentionIndex];
+              if (selected) applyMention(selected.handle);
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setMentionContext(null);
+            }
+          }}
           className={`rounded-xl border border-[#313131] bg-[#0f0f0f] px-3 py-2 text-sm outline-none placeholder:text-gray-500 focus:border-[#ff6a00] ${
             isCompact ? "min-h-20" : "min-h-28"
           }`}
         />
+        {mentionContext && mentionOptions.length ? (
+          <div className="rounded-xl border border-[#2f2f2f] bg-[#121212] p-1">
+            {mentionOptions.map((user, index) => (
+              <button
+                key={user.id}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  applyMention(user.handle);
+                }}
+                className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left ${
+                  index === activeMentionIndex ? "bg-[#25160d]" : "hover:bg-[#1c1c1c]"
+                }`}
+              >
+                <img src={user.avatar} alt={user.nickname} className="h-7 w-7 rounded-full border border-[#ff8c42]" />
+                <span className="text-sm text-white">{user.nickname}</span>
+                <span className="text-xs text-gray-400">@{user.handle}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         <div className="flex gap-2">
           <select
