@@ -58,8 +58,6 @@ const defaultCommunities: Community[] = [
     rules: ["Be respectful", "No spam", "Use clear titles"],
     tags: ["Campus", "Announcements"],
     privacy: "public",
-    membersCount: 1800,
-    onlineCount: 184,
   },
   {
     id: "coding",
@@ -70,8 +68,6 @@ const defaultCommunities: Community[] = [
     rules: ["Share context in questions", "No plagiarism", "Use code blocks"],
     tags: ["Programming", "Hackathons"],
     privacy: "public",
-    membersCount: 1260,
-    onlineCount: 133,
   },
   {
     id: "study",
@@ -82,8 +78,6 @@ const defaultCommunities: Community[] = [
     rules: ["No cheating discussions", "Stay on-topic", "Encourage others"],
     tags: ["Productivity", "Exams"],
     privacy: "public",
-    membersCount: 980,
-    onlineCount: 88,
   },
 ];
 
@@ -121,7 +115,15 @@ export default function CommunitiesPage() {
           id: docSnapshot.id,
           ...(docSnapshot.data() as Omit<Community, "id">),
         }));
-        setCommunities([...defaultCommunities, ...remote]);
+
+        // Merge by id so backend values override local defaults when present.
+        const merged = new Map<string, Community>();
+        defaultCommunities.forEach((community) => merged.set(community.id, community));
+        remote.forEach((community) => {
+          const base = merged.get(community.id) ?? { id: community.id } as Community;
+          merged.set(community.id, { ...base, ...community });
+        });
+        setCommunities(Array.from(merged.values()));
       },
       (error) => {
         console.error(error);
@@ -165,6 +167,26 @@ export default function CommunitiesPage() {
     () => posts.filter((post) => post.community === selectedCommunity?.id),
     [posts, selectedCommunity?.id],
   );
+
+  const communityRealtimeStats = useMemo(() => {
+    const statsByCommunity: Record<string, { creators: Set<string>; onlineCreators: Set<string> }> = {};
+    const now = Math.floor(Date.now() / 1000);
+    posts.forEach((post) => {
+      const communityId = post.community || "general";
+      if (!statsByCommunity[communityId]) {
+        statsByCommunity[communityId] = { creators: new Set<string>(), onlineCreators: new Set<string>() };
+      }
+      if (post.authorId) {
+        statsByCommunity[communityId].creators.add(post.authorId);
+        const age = now - (post.createdAt?.seconds ?? 0);
+        // "Online" proxy: users active in this community in the last 30 minutes.
+        if (age <= 30 * 60) {
+          statsByCommunity[communityId].onlineCreators.add(post.authorId);
+        }
+      }
+    });
+    return statsByCommunity;
+  }, [posts]);
 
   const sortedPosts = useMemo(() => {
     const items = [...filteredCommunityPosts];
@@ -317,13 +339,16 @@ export default function CommunitiesPage() {
                     : "border-[#2f2f2f] bg-[#101010] hover:border-[#ff6a00]"
                 }`}
               >
-                <p className="text-sm font-semibold">{community.name}</p>
-                <p className="mt-1 text-[11px] text-gray-400">
-                  {privacyIcon(community.privacy)} {privacyLabel(community.privacy)}
-                </p>
-              </button>
-            ))}
-          </div>
+                    <p className="text-sm font-semibold">{community.name}</p>
+                    <p className="mt-1 text-[11px] text-gray-400">
+                      {privacyIcon(community.privacy)} {privacyLabel(community.privacy)}
+                    </p>
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      Members: {community.membersCount ?? communityRealtimeStats[community.id]?.creators.size ?? 0}
+                    </p>
+                  </button>
+                ))}
+              </div>
 
           <form onSubmit={handleCreateCommunity} className="space-y-2 rounded-xl border border-[#2a2a2a] bg-[#101010] p-3">
             <p className="text-xs font-semibold text-[#ff8c42]">Create Community</p>
@@ -369,7 +394,9 @@ export default function CommunitiesPage() {
                   <div>
                     <h1 className="text-xl font-bold">{selectedCommunity.name}</h1>
                     <p className="text-xs text-white/80">
-                      {selectedCommunity.membersCount ?? memberRows.length} members | {selectedCommunity.onlineCount ?? 0} online
+                      {selectedCommunity.membersCount ?? communityRealtimeStats[selectedCommunity.id]?.creators.size ?? 0} members
+                      {" | "}
+                      {selectedCommunity.onlineCount ?? communityRealtimeStats[selectedCommunity.id]?.onlineCreators.size ?? 0} online
                     </p>
                   </div>
                 </div>
