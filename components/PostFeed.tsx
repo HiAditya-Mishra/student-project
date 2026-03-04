@@ -16,7 +16,7 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { normalizeHandle, resolveAvatar } from "@/lib/profile";
-import { getMentionContext, insertMention, MentionContext } from "@/lib/mentions";
+import { extractTopicTokens, getMentionContext, insertMention, MentionCandidate, MentionContext, rankMentionCandidate } from "@/lib/mentions";
 import { rewardCommentCreate, rewardCommentUpvote, rewardHelpfulComment, rewardPostUpvote } from "@/lib/rewards";
 
 interface Post {
@@ -60,6 +60,12 @@ type AuthorLite = {
   avatarUrl?: string;
 };
 
+type UserSignal = {
+  skills: string[];
+  interests: string;
+  followingCommunities: string[];
+};
+
 type PostFeedProps = {
   searchTerm?: string;
   readOnly?: boolean;
@@ -92,6 +98,7 @@ export default function PostFeed({
   const [submittingCommentPostId, setSubmittingCommentPostId] = useState<string | null>(null);
   const [updatingCommentId, setUpdatingCommentId] = useState<string | null>(null);
   const [markingHelpfulCommentId, setMarkingHelpfulCommentId] = useState<string | null>(null);
+  const [userSignalsById, setUserSignalsById] = useState<Record<string, UserSignal>>({});
   const commentListeners = useRef<Record<string, () => void>>({});
   const commentInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -145,6 +152,34 @@ export default function PostFeed({
       Object.values(commentListeners.current).forEach((unsubscribe) => unsubscribe());
       commentListeners.current = {};
     };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "users"),
+      (snapshot) => {
+        const next: Record<string, UserSignal> = {};
+        snapshot.docs.forEach((docSnapshot) => {
+          const data = docSnapshot.data() as {
+            skills?: string[];
+            interests?: string;
+            followingCommunities?: string[];
+          };
+          next[docSnapshot.id] = {
+            skills: Array.isArray(data.skills) ? data.skills.slice(0, 8) : [],
+            interests: data.interests || "",
+            followingCommunities: Array.isArray(data.followingCommunities) ? data.followingCommunities.slice(0, 30) : [],
+          };
+        });
+        setUserSignalsById(next);
+      },
+      (error) => {
+        console.error(error);
+        setUserSignalsById({});
+      },
+    );
+
+    return () => unsubscribe();
   }, []);
 
   const handleUpvote = async (postId: string) => {
@@ -496,19 +531,54 @@ export default function PostFeed({
   const getCommentMentionOptions = (postId: string) => {
     const context = commentMentionContext[postId];
     if (!context) return [];
+    const currentUserId = auth.currentUser?.uid || "";
+    const post = posts.find((item) => item.id === postId);
+    const postTopic = `${post?.title || ""} ${post?.content || ""}`;
+    const draftTopic = commentDrafts[postId] ?? "";
+    const topicTokens = extractTopicTokens(`${postTopic} ${draftTopic}`);
+    const commenters = commentsByPost[postId] ?? [];
+    const frequencyByAuthor: Record<string, number> = {};
+    commenters.forEach((comment) => {
+      if (!comment.authorId) return;
+      frequencyByAuthor[comment.authorId] = (frequencyByAuthor[comment.authorId] ?? 0) + 1;
+    });
 
     const token = context.query.trim();
     return Object.values(authorsById)
-      .map((user) => ({
-        id: user.id,
-        nickname: user.nickname,
-        handle: user.handle,
-        avatar: user.avatarUrl || resolveAvatar({ avatarSeed: user.id }, user.id),
-      }))
-      .filter((user) => {
-        if (!token) return true;
-        return user.handle.includes(token) || user.nickname.toLowerCase().includes(token);
+      .filter((user) => user.id !== currentUserId)
+      .map((user) => {
+        const signal = userSignalsById[user.id];
+        const candidate: MentionCandidate = {
+          id: user.id,
+          nickname: user.nickname,
+          handle: user.handle,
+          avatar: user.avatarUrl || resolveAvatar({ avatarSeed: user.id }, user.id),
+          skills: signal?.skills ?? [],
+          interests: signal?.interests ?? "",
+        };
+        const interactionScore =
+          (frequencyByAuthor[user.id] ?? 0) * 8 +
+          (post?.authorId === user.id ? 10 : 0);
+        const score = rankMentionCandidate({
+          candidate,
+          query: token,
+          topicTokens,
+          selectedCommunity: post?.community || "",
+          candidateCommunities: signal?.followingCommunities ?? [],
+          sharedCommunities: followingCommunities.filter((community) =>
+            (signal?.followingCommunities ?? []).includes(community),
+          ),
+          interactionScore,
+        });
+        return { candidate, score };
       })
+      .filter(({ candidate, score }) => {
+        if (!token) return score > 0;
+        if (candidate.handle.includes(token) || candidate.nickname.toLowerCase().includes(token)) return true;
+        return score >= 30;
+      })
+      .sort((a, b) => b.score - a.score)
+      .map((entry) => entry.candidate)
       .slice(0, 6);
   };
 

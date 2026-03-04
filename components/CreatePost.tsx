@@ -4,9 +4,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { normalizeHandle, resolveAvatar } from "@/lib/profile";
-import { getMentionContext, insertMention, MentionContext } from "@/lib/mentions";
+import {
+  extractTopicTokens,
+  getMentionContext,
+  insertMention,
+  MentionCandidate,
+  MentionContext,
+  rankMentionCandidate,
+} from "@/lib/mentions";
 import { rewardPostCreate } from "@/lib/rewards";
 import { useRouter } from "next/navigation";
+import { onAuthStateChanged } from "firebase/auth";
 
 type CreatePostProps = {
   mode?: "full" | "compact";
@@ -19,9 +27,10 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
   const [community, setCommunity] = useState("");
   const [communityOptions, setCommunityOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [loading, setLoading] = useState(false);
-  const [mentionCandidates, setMentionCandidates] = useState<
-    Array<{ id: string; nickname: string; handle: string; avatar: string }>
-  >([]);
+  const [mentionCandidates, setMentionCandidates] = useState<MentionCandidate[]>([]);
+  const [candidateCommunities, setCandidateCommunities] = useState<Record<string, string[]>>({});
+  const [interactionByUser, setInteractionByUser] = useState<Record<string, number>>({});
+  const [myCommunities, setMyCommunities] = useState<string[]>([]);
   const [mentionContext, setMentionContext] = useState<MentionContext | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [imageDataUrl, setImageDataUrl] = useState("");
@@ -32,30 +41,31 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
-      collection(db, "posts"),
+      collection(db, "users"),
       (snapshot) => {
-        const seen = new Set<string>();
-        const nextCandidates: Array<{ id: string; nickname: string; handle: string; avatar: string }> = [];
-
-        snapshot.docs.forEach((docSnapshot) => {
+        const nextCandidates: MentionCandidate[] = snapshot.docs.map((docSnapshot) => {
           const data = docSnapshot.data() as {
-            authorId?: string;
-            author?: string;
-            authorHandle?: string;
-            authorAvatarUrl?: string;
+            nickname?: string;
+            handle?: string;
+            avatarUrl?: string;
+            avatarSeed?: string;
+            skills?: string[];
+            interests?: string;
           };
-
-          const id = data.authorId?.trim();
-          if (!id || seen.has(id)) return;
-          seen.add(id);
-
-          const nickname = (data.author || "Campus User").trim();
-          const handle = normalizeHandle(data.authorHandle || nickname);
-          const avatar = data.authorAvatarUrl?.trim() || resolveAvatar({ avatarSeed: id }, id);
-          nextCandidates.push({ id, nickname, handle, avatar });
+          const nickname = (data.nickname || "Campus User").trim();
+          const handle = normalizeHandle(data.handle || nickname);
+          const avatar = resolveAvatar(data, docSnapshot.id);
+          return {
+            id: docSnapshot.id,
+            nickname,
+            handle,
+            avatar,
+            skills: Array.isArray(data.skills) ? data.skills.slice(0, 8) : [],
+            interests: data.interests || "",
+          };
         });
 
-        setMentionCandidates(nextCandidates.slice(0, 100));
+        setMentionCandidates(nextCandidates.slice(0, 400));
       },
       (error) => {
         console.error(error);
@@ -64,6 +74,73 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
     );
 
     return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "posts"),
+      (snapshot) => {
+        const nextCandidateCommunities: Record<string, string[]> = {};
+        const nextInteractions: Record<string, number> = {};
+        const currentUid = auth.currentUser?.uid || "";
+
+        snapshot.docs.forEach((docSnapshot) => {
+          const data = docSnapshot.data() as {
+            authorId?: string;
+            community?: string;
+            likedBy?: string[];
+          };
+
+          const id = data.authorId?.trim();
+          if (!id) return;
+          const community = (data.community || "").trim();
+          if (community) {
+            const list = nextCandidateCommunities[id] ?? [];
+            if (!list.includes(community)) list.push(community);
+            nextCandidateCommunities[id] = list.slice(0, 12);
+          }
+
+          if (currentUid && id !== currentUid && (data.likedBy ?? []).includes(currentUid)) {
+            nextInteractions[id] = (nextInteractions[id] ?? 0) + 4;
+          }
+        });
+
+        setCandidateCommunities(nextCandidateCommunities);
+        setInteractionByUser(nextInteractions);
+      },
+      (error) => {
+        console.error(error);
+        setCandidateCommunities({});
+        setInteractionByUser({});
+      },
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    let profileUnsub: (() => void) | null = null;
+    const authUnsub = onAuthStateChanged(auth, (user) => {
+      if (profileUnsub) {
+        profileUnsub();
+        profileUnsub = null;
+      }
+      if (!user) {
+        setMyCommunities([]);
+        return;
+      }
+      profileUnsub = onSnapshot(doc(db, "users", user.uid), (snapshot) => {
+        const data = snapshot.exists()
+          ? snapshot.data() as { followingCommunities?: string[] }
+          : {};
+        setMyCommunities(Array.isArray(data.followingCommunities) ? data.followingCommunities.slice(0, 30) : []);
+      });
+    });
+
+    return () => {
+      if (profileUnsub) profileUnsub();
+      authUnsub();
+    };
   }, []);
 
   useEffect(() => {
@@ -96,14 +173,43 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
   const mentionOptions = useMemo(() => {
     if (!mentionContext) return [];
     const token = mentionContext.query.trim();
+    const currentUid = auth.currentUser?.uid || "";
+    const topicTokens = extractTopicTokens(`${title} ${content}`);
 
-    return mentionCandidates
-      .filter((user) => {
-        if (!token) return true;
-        return user.handle.includes(token) || user.nickname.toLowerCase().includes(token);
+    const withScores = mentionCandidates
+      .filter((user) => user.id !== currentUid)
+      .map((user) => {
+        const score = rankMentionCandidate({
+          candidate: user,
+          query: token,
+          topicTokens,
+          selectedCommunity: community,
+          candidateCommunities: candidateCommunities[user.id] ?? [],
+          sharedCommunities: myCommunities.filter((communityId) =>
+            (candidateCommunities[user.id] ?? []).includes(communityId),
+          ),
+          interactionScore: interactionByUser[user.id] ?? 0,
+        });
+        return { user, score };
       })
-      .slice(0, 6);
-  }, [mentionContext, mentionCandidates]);
+      .filter(({ user, score }) => {
+        if (!token) return score > 0;
+        if (user.handle.includes(token) || user.nickname.toLowerCase().includes(token)) return true;
+        return score >= 30;
+      })
+      .sort((a, b) => b.score - a.score);
+
+    return withScores.map((entry) => entry.user).slice(0, 6);
+  }, [
+    mentionContext,
+    mentionCandidates,
+    title,
+    content,
+    community,
+    candidateCommunities,
+    myCommunities,
+    interactionByUser,
+  ]);
 
   const syncMentionContext = (nextText: string, caret: number) => {
     const nextMentionContext = getMentionContext(nextText, caret);

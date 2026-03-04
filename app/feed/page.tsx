@@ -9,6 +9,7 @@ import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
 import { usePathname, useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import { normalizeHandle, resolveAvatar, UserProfileDoc } from "@/lib/profile";
+import { STREAK_INSURANCE_COST, useStreakInsurance } from "@/lib/rewards";
 
 type UserProfile = UserProfileDoc;
 type AuthorSearchItem = {
@@ -36,6 +37,7 @@ export default function FeedPage() {
   const [searchAuthors, setSearchAuthors] = useState<AuthorSearchItem[]>([]);
   const [roomsError, setRoomsError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [usingInsurance, setUsingInsurance] = useState(false);
 
   useEffect(() => {
     let profileUnsubscribe: (() => void) | null = null;
@@ -169,6 +171,26 @@ export default function FeedPage() {
   const followingCommunities = profile?.followingCommunities ?? [];
   const normalizedSearch = searchTerm.trim().toLowerCase();
 
+  const utcDateKey = (offset = 0) => {
+    const date = new Date();
+    date.setUTCDate(date.getUTCDate() + offset);
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(date.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
+  const today = utcDateKey(0);
+  const yesterday = utcDateKey(-1);
+  const monthlyInsuranceUsed = profile?.streakInsuranceMonthKey === today.slice(0, 7);
+  const insuranceNeeded = Boolean(
+    (profile?.postStreak ?? 0) > 0 &&
+      profile?.lastPostRewardDate &&
+      profile.lastPostRewardDate !== today &&
+      profile.lastPostRewardDate !== yesterday,
+  );
+  const canUseInsurance = insuranceNeeded && !monthlyInsuranceUsed && sapphire >= STREAK_INSURANCE_COST;
+
   const matchedProfiles = useMemo(() => {
     if (!normalizedSearch) return [];
     const token = normalizedSearch.startsWith("@") ? normalizedSearch.slice(1) : normalizedSearch;
@@ -215,6 +237,41 @@ export default function FeedPage() {
       await setDoc(doc(db, "users", currentUser.uid), { followingUsers: next }, { merge: true });
     } catch (error) {
       console.error(error);
+    }
+  };
+
+  const handleUseStreakInsurance = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      alert("Please login first.");
+      return;
+    }
+
+    try {
+      setUsingInsurance(true);
+      const result = await useStreakInsurance(user.uid);
+      if (!result.ok) {
+        if (result.reason === "NOT_NEEDED_YET") alert("Streak insurance is only for recovering a missed day.");
+        else if (result.reason === "ALREADY_USED_THIS_MONTH") alert("You already used streak insurance this month.");
+        else if (result.reason === "INSUFFICIENT_SAPPHIRES") alert(`You need ${STREAK_INSURANCE_COST} sapphires.`);
+        else if (result.reason === "NO_STREAK") alert("You need an active streak first.");
+        else alert("Could not apply streak insurance.");
+        return;
+      }
+
+      setProfile((prev) => ({
+        ...(prev ?? {}),
+        sapphires: result.sapphiresLeft,
+        lastPostRewardDate: yesterday,
+        streakInsuranceMonthKey: today.slice(0, 7),
+        streakInsuranceUsedAt: today,
+      }));
+      alert("Streak insurance applied. Post today to continue your streak.");
+    } catch (error) {
+      console.error(error);
+      alert("Could not apply streak insurance.");
+    } finally {
+      setUsingInsurance(false);
     }
   };
 
@@ -363,6 +420,26 @@ export default function FeedPage() {
               <p className="mt-1 text-2xl font-bold text-[#5bc0ff]">{sapphire}</p>
               <p className="mt-1 text-xs text-gray-500">Rank: {levelTitle}</p>
               <p className="mt-1 text-xs text-gray-500">Post Streak: {profile?.postStreak ?? 0} days</p>
+              <div className="mt-3 rounded-lg border border-[#2a2a2a] bg-[#0e0e0e] p-2">
+                <p className="text-[11px] text-gray-400">Streak Insurance ({STREAK_INSURANCE_COST} sapphires, once/month)</p>
+                <button
+                  type="button"
+                  onClick={() => void handleUseStreakInsurance()}
+                  disabled={!canUseInsurance || usingInsurance}
+                  className="mt-2 w-full rounded border border-[#2f2f2f] px-2 py-1 text-xs text-gray-200 hover:border-[#ff6a00] disabled:opacity-50"
+                >
+                  {usingInsurance ? "Applying..." : "Protect Broken Streak"}
+                </button>
+                {!insuranceNeeded ? (
+                  <p className="mt-1 text-[10px] text-gray-500">Available after you miss one day.</p>
+                ) : monthlyInsuranceUsed ? (
+                  <p className="mt-1 text-[10px] text-gray-500">Already used this month.</p>
+                ) : sapphire < STREAK_INSURANCE_COST ? (
+                  <p className="mt-1 text-[10px] text-gray-500">Need {STREAK_INSURANCE_COST} sapphires.</p>
+                ) : (
+                  <p className="mt-1 text-[10px] text-green-400">Ready to use.</p>
+                )}
+              </div>
             </div>
 
             <button

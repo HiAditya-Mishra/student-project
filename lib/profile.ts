@@ -17,6 +17,8 @@ export type UserProfileDoc = {
   commentsCount?: number;
   postStreak?: number;
   lastPostRewardDate?: string;
+  streakInsuranceMonthKey?: string;
+  streakInsuranceUsedAt?: string;
   upvoteRewardDate?: string;
   upvoteRewardToday?: number;
   followingUsers?: string[];

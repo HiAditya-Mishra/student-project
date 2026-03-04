@@ -25,8 +25,12 @@ type UserRewardState = {
   postStreak?: number;
   upvoteRewardDate?: string;
   upvoteRewardToday?: number;
+  streakInsuranceMonthKey?: string;
+  streakInsuranceUsedAt?: string;
   updatedAt?: unknown;
 };
+
+export const STREAK_INSURANCE_COST = 120;
 
 function dateKey(date = new Date()) {
   const year = date.getUTCFullYear();
@@ -39,6 +43,12 @@ function yesterdayKey() {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() - 1);
   return dateKey(date);
+}
+
+function monthKey(date = new Date()) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
 }
 
 export function getLevelFromSapphires(sapphires: number): LevelInfo {
@@ -108,9 +118,66 @@ export async function ensureRewardDefaults(userId: string) {
       upvoteRewardToday: 0,
       upvoteRewardDate: "",
       lastPostRewardDate: "",
+      streakInsuranceMonthKey: "",
+      streakInsuranceUsedAt: "",
     },
     { merge: true },
   );
+}
+
+export async function useStreakInsurance(userId: string) {
+  const userRef = doc(db, "users", userId);
+  return runTransaction(db, async (tx) => {
+    const snapshot = await tx.get(userRef);
+    const current = (snapshot.exists() ? snapshot.data() : {}) as UserRewardState;
+    const currentStreak = current.postStreak || 0;
+    const today = dateKey();
+    const yesterday = yesterdayKey();
+    const thisMonth = monthKey();
+
+    if (currentStreak <= 0) {
+      return { ok: false, reason: "NO_STREAK" as const };
+    }
+
+    if ((current.streakInsuranceMonthKey || "") === thisMonth) {
+      return { ok: false, reason: "ALREADY_USED_THIS_MONTH" as const };
+    }
+
+    const lastPostDate = current.lastPostRewardDate || "";
+    if (!lastPostDate || lastPostDate === today || lastPostDate === yesterday) {
+      return { ok: false, reason: "NOT_NEEDED_YET" as const };
+    }
+
+    const currentSapphires = current.sapphires || 0;
+    if (currentSapphires < STREAK_INSURANCE_COST) {
+      return { ok: false, reason: "INSUFFICIENT_SAPPHIRES" as const, required: STREAK_INSURANCE_COST };
+    }
+
+    const nextSapphires = currentSapphires - STREAK_INSURANCE_COST;
+    const level = getLevelFromSapphires(nextSapphires);
+
+    tx.set(
+      userRef,
+      {
+        sapphires: nextSapphires,
+        level: level.level,
+        levelTitle: level.title,
+        lastPostRewardDate: yesterday,
+        streakInsuranceMonthKey: thisMonth,
+        streakInsuranceUsedAt: today,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    return {
+      ok: true,
+      reason: "APPLIED" as const,
+      sapphiresSpent: STREAK_INSURANCE_COST,
+      sapphiresLeft: nextSapphires,
+      streakProtected: currentStreak,
+    };
+  });
 }
 
 export async function rewardPostCreate(userId: string) {
