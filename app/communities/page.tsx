@@ -19,7 +19,7 @@ import {
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { normalizeHandle } from "@/lib/profile";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 type PrivacyType = "public" | "private" | "invite";
 type CommunityTab = "posts" | "trending" | "events" | "members" | "leaderboard";
@@ -90,7 +90,6 @@ function privacyIcon(privacy?: PrivacyType) {
 
 export default function CommunitiesPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [communities, setCommunities] = useState<Community[]>([]);
   const [joined, setJoined] = useState<Record<string, boolean>>({});
   const [currentUserId, setCurrentUserId] = useState<string>("");
@@ -106,6 +105,7 @@ export default function CommunitiesPage() {
   const [expandedPostComments, setExpandedPostComments] = useState<Comment[]>([]);
   const [inviteUnlockedByCommunity, setInviteUnlockedByCommunity] = useState<Record<string, boolean>>({});
   const [inviteNotice, setInviteNotice] = useState<string | null>(null);
+  const [inviteToken, setInviteToken] = useState("");
 
   useEffect(() => {
     let profileUnsub: (() => void) | null = null;
@@ -231,7 +231,9 @@ export default function CommunitiesPage() {
   );
 
   useEffect(() => {
-    const token = searchParams.get("invite");
+    if (typeof window === "undefined") return;
+    const token = new URLSearchParams(window.location.search).get("invite") ?? "";
+    setInviteToken(token);
     if (!token) return;
     const [communityId, code] = token.split(":");
     if (!communityId || !code) {
@@ -250,7 +252,7 @@ export default function CommunitiesPage() {
 
     setInviteUnlockedByCommunity((prev) => ({ ...prev, [communityId]: true }));
     setInviteNotice(`Invite verified for ${target.name}. You can now join.`);
-  }, [communities, searchParams]);
+  }, [communities]);
 
   const filteredCommunityPosts = useMemo(
     () => posts.filter((post) => post.community === selectedCommunity?.id),
@@ -401,7 +403,7 @@ export default function CommunitiesPage() {
         const hasInviteAccess =
           options?.forceInviteAccess ||
           inviteUnlockedByCommunity[targetCommunityId] ||
-          (raw.inviteCode && searchParams.get("invite") === `${targetCommunityId}:${raw.inviteCode}`);
+          (raw.inviteCode && inviteToken === `${targetCommunityId}:${raw.inviteCode}`);
 
         if (!currentlyJoined) {
           if (privacy === "private" && !canBypassPrivacy) {
