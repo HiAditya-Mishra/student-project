@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import Navbar from "@/components/navbar";
-import { countWords, normalizeHandle, resolveAvatar } from "@/lib/profile";
+import { avatarFromSeed, normalizeHandle, resolveAvatar } from "@/lib/profile";
 import { LEVELS } from "@/lib/rewards";
 
 type UserProfile = {
@@ -49,12 +49,18 @@ const defaultProfile: UserProfile = {
   postStreak: 0,
 };
 
-const BIO_WORD_LIMIT = 500;
+const BIO_CHAR_LIMIT = 1000;
+const AVATAR_CROP_SIZE = 260;
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile>(defaultProfile);
   const [skillsInput, setSkillsInput] = useState("");
   const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
+  const [pendingAvatarSrc, setPendingAvatarSrc] = useState<string | null>(null);
+  const [pendingAvatarMeta, setPendingAvatarMeta] = useState<{ width: number; height: number } | null>(null);
+  const [avatarZoom, setAvatarZoom] = useState(1);
+  const [avatarPanX, setAvatarPanX] = useState(0);
+  const [avatarPanY, setAvatarPanY] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const router = useRouter();
@@ -99,10 +105,73 @@ export default function ProfilePage() {
   }, [router]);
 
   const avatarPreview = useMemo(() => resolveAvatar(profile, auth.currentUser?.uid), [profile]);
-  const bioWordCount = useMemo(() => countWords(profile.bio), [profile.bio]);
+  const bioCharCount = profile.bio.length;
+  const seedAvatarPreview = useMemo(
+    () => avatarFromSeed(profile.avatarSeed.trim() || auth.currentUser?.uid || "campus-user"),
+    [profile.avatarSeed],
+  );
+  const hasCustomAvatar = Boolean(profile.avatarUrl.trim());
 
   const updateField = <K extends keyof UserProfile>(field: K, value: UserProfile[K]) => {
     setProfile((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const getCropLayout = () => {
+    if (!pendingAvatarMeta) return null;
+    const coverScale = Math.max(AVATAR_CROP_SIZE / pendingAvatarMeta.width, AVATAR_CROP_SIZE / pendingAvatarMeta.height);
+    const drawWidth = pendingAvatarMeta.width * coverScale * avatarZoom;
+    const drawHeight = pendingAvatarMeta.height * coverScale * avatarZoom;
+    const drawX = (AVATAR_CROP_SIZE - drawWidth) / 2 + avatarPanX;
+    const drawY = (AVATAR_CROP_SIZE - drawHeight) / 2 + avatarPanY;
+    return { drawWidth, drawHeight, drawX, drawY };
+  };
+
+  const applyAvatarCrop = async () => {
+    if (!pendingAvatarSrc || !pendingAvatarMeta) return;
+    const layout = getCropLayout();
+    if (!layout) return;
+
+    const source = new Image();
+    source.src = pendingAvatarSrc;
+    await new Promise<void>((resolve, reject) => {
+      source.onload = () => resolve();
+      source.onerror = () => reject(new Error("Could not load image"));
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const ratio = canvas.width / AVATAR_CROP_SIZE;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(canvas.width / 2, canvas.height / 2, canvas.width / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(
+      source,
+      layout.drawX * ratio,
+      layout.drawY * ratio,
+      layout.drawWidth * ratio,
+      layout.drawHeight * ratio,
+    );
+    ctx.restore();
+
+    const dataUrl = canvas.toDataURL("image/png", 0.92);
+    setProfile((prev) => ({ ...prev, avatarUrl: dataUrl }));
+    setPendingAvatarSrc(null);
+    setPendingAvatarMeta(null);
+    setAvatarZoom(1);
+    setAvatarPanX(0);
+    setAvatarPanY(0);
+  };
+
+  const resetAvatarToSeed = () => {
+    setProfile((prev) => ({ ...prev, avatarUrl: "" }));
+    setAvatarUploadError(null);
   };
 
   const onAvatarFileChange = (file: File | null) => {
@@ -119,8 +188,17 @@ export default function ProfilePage() {
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result !== "string") return;
-      setAvatarUploadError(null);
-      setProfile((prev) => ({ ...prev, avatarUrl: reader.result as string }));
+      const img = new Image();
+      img.onload = () => {
+        setAvatarUploadError(null);
+        setPendingAvatarSrc(reader.result as string);
+        setPendingAvatarMeta({ width: img.naturalWidth, height: img.naturalHeight });
+        setAvatarZoom(1);
+        setAvatarPanX(0);
+        setAvatarPanY(0);
+      };
+      img.onerror = () => setAvatarUploadError("Could not load this image.");
+      img.src = reader.result as string;
     };
     reader.readAsDataURL(file);
   };
@@ -143,19 +221,33 @@ export default function ProfilePage() {
       alert("Username handle is required.");
       return;
     }
-    if (bioWordCount > BIO_WORD_LIMIT) {
-      alert(`Bio must be ${BIO_WORD_LIMIT} words or fewer.`);
+    const normalizedHandle = normalizeHandle(profile.handle);
+    if (!normalizedHandle.trim()) {
+      alert("Username handle is required.");
+      return;
+    }
+    if (bioCharCount > BIO_CHAR_LIMIT) {
+      alert(`Bio must be ${BIO_CHAR_LIMIT} characters or fewer.`);
       return;
     }
 
     try {
       setSaving(true);
+      const handleQuery = query(collection(db, "users"), where("handle", "==", normalizedHandle));
+      const handleMatches = await getDocs(handleQuery);
+      const isTaken = handleMatches.docs.some((match) => match.id !== user.uid);
+      if (isTaken) {
+        alert("This @username is already taken. Please choose another one.");
+        setSaving(false);
+        return;
+      }
+
       await setDoc(
         doc(db, "users", user.uid),
         {
           ...profile,
           nickname: profile.nickname.trim(),
-          handle: normalizeHandle(profile.handle),
+          handle: normalizedHandle,
           bio: profile.bio.trim(),
           hobbies: profile.hobbies.trim(),
           interests: profile.interests.trim(),
@@ -222,10 +314,11 @@ export default function ProfilePage() {
             <textarea
               value={profile.bio}
               onChange={(e) => updateField("bio", e.target.value)}
+              maxLength={BIO_CHAR_LIMIT}
               className="min-h-24 w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
             />
-            <p className={`text-xs ${bioWordCount > BIO_WORD_LIMIT ? "text-red-300" : "text-gray-500"}`}>
-              {bioWordCount}/{BIO_WORD_LIMIT} words
+            <p className={`text-xs ${bioCharCount > BIO_CHAR_LIMIT ? "text-red-300" : "text-gray-500"}`}>
+              {bioCharCount}/{BIO_CHAR_LIMIT} characters
             </p>
           </label>
 
@@ -238,6 +331,16 @@ export default function ProfilePage() {
                 onChange={(e) => onAvatarFileChange(e.target.files?.[0] ?? null)}
                 className="w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-xs outline-none file:mr-2 file:rounded file:border-0 file:bg-[#ff6a00] file:px-2 file:py-1 file:text-white"
               />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={resetAvatarToSeed}
+                  className="rounded-md border border-[#2f2f2f] px-2 py-1 text-[11px] text-gray-300 hover:border-[#ff6a00]"
+                >
+                  Reset to Seed Avatar
+                </button>
+                {hasCustomAvatar ? <span className="text-[11px] text-[#ffb380]">Custom avatar active</span> : null}
+              </div>
             </label>
             <label className="space-y-1">
               <span className="text-xs text-gray-400">Avatar fallback seed</span>
@@ -245,6 +348,11 @@ export default function ProfilePage() {
                 value={profile.avatarSeed}
                 onChange={(e) => updateField("avatarSeed", e.target.value)}
                 className="w-full rounded-lg border border-[#303030] bg-[#111111] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+              />
+              <img
+                src={seedAvatarPreview}
+                alt="Seed avatar preview"
+                className={`h-10 w-10 rounded-full border border-[#2f2f2f] transition-opacity ${hasCustomAvatar ? "opacity-40" : "opacity-100"}`}
               />
             </label>
           </div>
@@ -351,6 +459,95 @@ export default function ProfilePage() {
           </div>
         </aside>
       </main>
+
+      {pendingAvatarSrc && pendingAvatarMeta ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/75 p-4">
+          <div className="w-full max-w-md space-y-3 rounded-2xl border border-[#2f2f2f] bg-[#141414] p-4">
+            <p className="text-sm font-semibold text-[#ff8c42]">Crop Avatar</p>
+            <p className="text-xs text-gray-400">Adjust and save only circular avatar image.</p>
+
+            <div className="mx-auto relative overflow-hidden rounded-full border border-[#ff8c42]" style={{ width: AVATAR_CROP_SIZE, height: AVATAR_CROP_SIZE }}>
+              {(() => {
+                const layout = getCropLayout();
+                if (!layout) return null;
+                return (
+                  <img
+                    src={pendingAvatarSrc}
+                    alt="Avatar crop preview"
+                    className="absolute max-w-none"
+                    style={{
+                      width: layout.drawWidth,
+                      height: layout.drawHeight,
+                      left: layout.drawX,
+                      top: layout.drawY,
+                    }}
+                  />
+                );
+              })()}
+            </div>
+
+            <label className="space-y-1 block">
+              <span className="text-xs text-gray-400">Zoom</span>
+              <input
+                type="range"
+                min={1}
+                max={2.5}
+                step={0.01}
+                value={avatarZoom}
+                onChange={(e) => setAvatarZoom(Number(e.target.value))}
+                className="w-full"
+              />
+            </label>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="space-y-1">
+                <span className="text-xs text-gray-400">Horizontal</span>
+                <input
+                  type="range"
+                  min={-120}
+                  max={120}
+                  step={1}
+                  value={avatarPanX}
+                  onChange={(e) => setAvatarPanX(Number(e.target.value))}
+                  className="w-full"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs text-gray-400">Vertical</span>
+                <input
+                  type="range"
+                  min={-120}
+                  max={120}
+                  step={1}
+                  value={avatarPanY}
+                  onChange={(e) => setAvatarPanY(Number(e.target.value))}
+                  className="w-full"
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingAvatarSrc(null);
+                  setPendingAvatarMeta(null);
+                }}
+                className="rounded-lg border border-[#2f2f2f] px-3 py-1.5 text-xs text-gray-300 hover:border-[#ff6a00]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void applyAvatarCrop()}
+                className="rounded-lg bg-[#ff6a00] px-3 py-1.5 text-xs font-semibold text-white"
+              >
+                Apply Crop
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

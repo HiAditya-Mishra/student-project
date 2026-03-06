@@ -25,6 +25,8 @@ type UserRewardState = {
   postStreak?: number;
   upvoteRewardDate?: string;
   upvoteRewardToday?: number;
+  loginStreak?: number;
+  lastLoginDate?: string;
   streakInsuranceMonthKey?: string;
   streakInsuranceUsedAt?: string;
   updatedAt?: unknown;
@@ -117,12 +119,43 @@ export async function ensureRewardDefaults(userId: string) {
       postStreak: 0,
       upvoteRewardToday: 0,
       upvoteRewardDate: "",
+      loginStreak: 0,
+      lastLoginDate: "",
       lastPostRewardDate: "",
       streakInsuranceMonthKey: "",
       streakInsuranceUsedAt: "",
     },
     { merge: true },
   );
+}
+
+export async function rewardLoginStreak(userId: string) {
+  const userRef = doc(db, "users", userId);
+  return runTransaction(db, async (tx) => {
+    const snapshot = await tx.get(userRef);
+    const current = (snapshot.exists() ? snapshot.data() : {}) as UserRewardState;
+    const today = dateKey();
+    const yesterday = yesterdayKey();
+    const previousLoginDate = current.lastLoginDate || "";
+    const previousStreak = current.loginStreak || 0;
+
+    if (previousLoginDate === today) {
+      return { updated: false, streak: previousStreak };
+    }
+
+    const nextStreak = previousLoginDate === yesterday ? previousStreak + 1 : 1;
+    tx.set(
+      userRef,
+      {
+        loginStreak: nextStreak,
+        lastLoginDate: today,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    return { updated: true, streak: nextStreak };
+  });
 }
 
 export async function useStreakInsurance(userId: string) {

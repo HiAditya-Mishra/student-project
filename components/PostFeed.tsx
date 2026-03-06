@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   addDoc,
   collection,
@@ -516,14 +517,13 @@ export default function PostFeed({
       }
 
       return (
-        <button
+        <Link
           key={`${part}-${index}`}
-          type="button"
-          onClick={() => openProfile(mentionUser.id)}
+          href={`/profile/${mentionUser.id}`}
           className="font-semibold text-[#ff8c42] hover:underline"
         >
           @{handle}
-        </button>
+        </Link>
       );
     });
   };

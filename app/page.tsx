@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import { rewardLoginStreak } from "@/lib/rewards";
 
 export default function Home() {
   const router = useRouter();
@@ -18,6 +19,7 @@ export default function Home() {
       }
 
       const userDoc = await getDoc(doc(db, "users", user.uid));
+      await rewardLoginStreak(user.uid);
       router.replace(userDoc.exists() ? "/feed" : "/profile-setup");
     });
 

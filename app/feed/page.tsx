@@ -9,7 +9,7 @@ import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
 import { usePathname, useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import { normalizeHandle, resolveAvatar, UserProfileDoc } from "@/lib/profile";
-import { STREAK_INSURANCE_COST, useStreakInsurance } from "@/lib/rewards";
+import { rewardLoginStreak, STREAK_INSURANCE_COST, useStreakInsurance } from "@/lib/rewards";
 
 type UserProfile = UserProfileDoc;
 type AuthorSearchItem = {
@@ -52,6 +52,7 @@ export default function FeedPage() {
         setAuthLoading(false);
         return;
       }
+      void rewardLoginStreak(user.uid);
 
       const profileRef = doc(db, "users", user.uid);
       if (profileUnsubscribe) profileUnsubscribe();
@@ -419,7 +420,7 @@ export default function FeedPage() {
               <p className="text-xs text-gray-400">Sapphire</p>
               <p className="mt-1 text-2xl font-bold text-[#5bc0ff]">{sapphire}</p>
               <p className="mt-1 text-xs text-gray-500">Rank: {levelTitle}</p>
-              <p className="mt-1 text-xs text-gray-500">Post Streak: {profile?.postStreak ?? 0} days</p>
+              <p className="mt-1 text-xs text-gray-500">Login Streak: {profile?.loginStreak ?? 0} days</p>
               <div className="mt-3 rounded-lg border border-[#2a2a2a] bg-[#0e0e0e] p-2">
                 <p className="text-[11px] text-gray-400">Streak Insurance ({STREAK_INSURANCE_COST} sapphires, once/month)</p>
                 <button

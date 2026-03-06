@@ -7,7 +7,7 @@ import { normalizeHandle } from "@/lib/profile";
 import { arrayUnion, collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc, writeBatch } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 
-type CommunityVisibility = "public" | "private";
+type CommunityVisibility = "public" | "private" | "invite";
 
 type UserCandidate = {
   id: string;
@@ -23,6 +23,10 @@ type UserDocLite = {
 
 function slugFromName(name: string) {
   return normalizeHandle(name).replace(/_/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 40) || "community";
+}
+
+function generateInviteCode() {
+  return Math.random().toString(36).slice(2, 10).toUpperCase();
 }
 
 export default function CreateCommunityPage() {
@@ -151,8 +155,9 @@ export default function CreateCommunityPage() {
             ? "linear-gradient(120deg, #24152c, #a266ff)"
             : "linear-gradient(120deg, #3b1d00, #ff6a00)",
           privacy: visibility,
+          inviteCode: visibility === "invite" ? generateInviteCode() : "",
           rules: parsedRules,
-          tags: ["Student"],
+          tags: [],
           events: [],
           modIds,
           ownerId: user.uid,
@@ -224,9 +229,16 @@ export default function CreateCommunityPage() {
               >
                 <option value="public">Public</option>
                 <option value="private">Private</option>
+                <option value="invite">Invite Only</option>
               </select>
             </label>
           </div>
+
+          {visibility === "invite" ? (
+            <p className="text-xs text-[#ffb380]">
+              Invite-only communities generate a private invite link after creation.
+            </p>
+          ) : null}
 
           <label className="space-y-1 block">
             <span className="text-xs text-gray-400">Summary</span>
@@ -267,17 +279,23 @@ export default function CreateCommunityPage() {
                       <p className="truncate text-xs text-gray-400">@{candidate.handle}</p>
                     </div>
                     <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => toggleMember(candidate.id)}
-                        className={`rounded px-2 py-1 text-[11px] ${
-                          selectedMembers[candidate.id]
-                            ? "bg-[#ff6a00] text-white"
-                            : "border border-[#2f2f2f] text-gray-300"
-                        }`}
-                      >
-                        {selectedMembers[candidate.id] ? "Member Added" : "Add Member"}
-                      </button>
+                      {selectedMembers[candidate.id] ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleMember(candidate.id)}
+                          className="rounded border border-[#ff6a00] bg-[#2a1608] px-2 py-1 text-[11px] text-[#ff8c42]"
+                        >
+                          Remove Member
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => toggleMember(candidate.id)}
+                          className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-gray-300"
+                        >
+                          Add Member
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => toggleModerator(candidate.id)}

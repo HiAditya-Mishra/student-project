@@ -2,13 +2,15 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { collection, doc, getDocs, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { normalizeHandle } from "@/lib/profile";
 import { getLevelFromSapphires } from "@/lib/rewards";
 
 export default function ProfileSetupPage() {
   const [nickname, setNickname] = useState("");
+  const [handle, setHandle] = useState("");
+  const [handleEdited, setHandleEdited] = useState(false);
   const [hobbies, setHobbies] = useState("");
   const [interests, setInterests] = useState("");
   const [saving, setSaving] = useState(false);
@@ -25,15 +27,29 @@ export default function ProfileSetupPage() {
       alert("Please fill all profile fields.");
       return;
     }
+    const normalizedHandle = normalizeHandle(handle || nickname);
+    if (!normalizedHandle.trim()) {
+      alert("Username handle is required.");
+      return;
+    }
 
     try {
       setSaving(true);
+      const handleQuery = query(collection(db, "users"), where("handle", "==", normalizedHandle));
+      const handleMatches = await getDocs(handleQuery);
+      const isTaken = handleMatches.docs.some((match) => match.id !== user.uid);
+      if (isTaken) {
+        alert("This @username is already taken. Please choose another one.");
+        setSaving(false);
+        return;
+      }
+
       const initialLevel = getLevelFromSapphires(0);
       await setDoc(
         doc(db, "users", user.uid),
         {
           nickname: nickname.trim(),
-          handle: normalizeHandle(nickname),
+          handle: normalizedHandle,
           hobbies: hobbies.trim(),
           interests: interests.trim(),
           bio: "",
@@ -52,6 +68,8 @@ export default function ProfileSetupPage() {
           lastPostRewardDate: "",
           upvoteRewardDate: "",
           upvoteRewardToday: 0,
+          loginStreak: 0,
+          lastLoginDate: "",
           email: user.email ?? "",
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -76,7 +94,23 @@ export default function ProfileSetupPage() {
           placeholder="Nickname"
           className="w-full rounded bg-[#0f0f0f] p-2"
           value={nickname}
-          onChange={(e) => setNickname(e.target.value)}
+          onChange={(e) => {
+            const nextNickname = e.target.value;
+            setNickname(nextNickname);
+            if (!handleEdited) {
+              setHandle(normalizeHandle(nextNickname));
+            }
+          }}
+        />
+
+        <input
+          placeholder="Username handle (@...)"
+          className="w-full rounded bg-[#0f0f0f] p-2"
+          value={handle}
+          onChange={(e) => {
+            setHandleEdited(true);
+            setHandle(normalizeHandle(e.target.value));
+          }}
         />
 
         <input

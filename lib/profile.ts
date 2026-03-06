@@ -21,6 +21,8 @@ export type UserProfileDoc = {
   streakInsuranceUsedAt?: string;
   upvoteRewardDate?: string;
   upvoteRewardToday?: number;
+  loginStreak?: number;
+  lastLoginDate?: string;
   followingUsers?: string[];
   followingCommunities?: string[];
 };
@@ -42,7 +44,7 @@ export function countWords(text: string) {
 }
 
 export function avatarFromSeed(seed: string) {
-  return `https://api.dicebear.com/9.x/thumbs/svg?seed=${encodeURIComponent(seed || "campus-user")}`;
+  return `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(seed || "campus-user")}`;
 }
 
 export function resolveAvatar(profile?: Pick<UserProfileDoc, "avatarUrl" | "avatarSeed"> | null, fallbackSeed?: string) {

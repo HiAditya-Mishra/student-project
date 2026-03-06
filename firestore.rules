@@ -1,0 +1,154 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function communityDoc(communityId) {
+      return get(/databases/$(database)/documents/communities/$(communityId));
+    }
+
+    function isCommunityAdminById(communityId) {
+      return signedIn()
+        && communityDoc(communityId).exists()
+        && (
+          communityDoc(communityId).data.ownerId == request.auth.uid
+          || communityDoc(communityId).data.modIds.hasAny([request.auth.uid])
+        );
+    }
+
+    function isCommunityAdminFromResource() {
+      return signedIn()
+        && (
+          resource.data.ownerId == request.auth.uid
+          || resource.data.modIds.hasAny([request.auth.uid])
+        );
+    }
+
+    function communityJoinKeysOnly() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+        "memberIds",
+        "onlineMemberIds",
+        "membersCount",
+        "onlineCount",
+        "updatedAt"
+      ]);
+    }
+
+    function isPublicOrInviteCommunity() {
+      return (resource.data.privacy == "public" || resource.data.privacy == "invite");
+    }
+
+    function isSelfJoin() {
+      return signedIn()
+        && isPublicOrInviteCommunity()
+        && !resource.data.memberIds.hasAny([request.auth.uid])
+        && request.resource.data.memberIds.hasAny([request.auth.uid])
+        && request.resource.data.memberIds.hasAll(resource.data.memberIds)
+        && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1;
+    }
+
+    function isSelfLeave() {
+      return signedIn()
+        && resource.data.memberIds.hasAny([request.auth.uid])
+        && !request.resource.data.memberIds.hasAny([request.auth.uid])
+        && resource.data.memberIds.hasAll(request.resource.data.memberIds)
+        && request.resource.data.memberIds.size() + 1 == resource.data.memberIds.size();
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create: if isSelf(uid);
+      allow update: if isSelf(uid);
+      allow delete: if false;
+    }
+
+    match /communities/{communityId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.memberIds.hasAny([request.auth.uid])
+        && request.resource.data.modIds.hasAny([request.auth.uid]);
+
+      allow update: if signedIn() && (
+        isCommunityAdminFromResource()
+        || (
+          !isCommunityAdminFromResource()
+          && communityJoinKeysOnly()
+          && (isSelfJoin() || isSelfLeave())
+        )
+      );
+      allow delete: if isCommunityAdminFromResource();
+    }
+
+    match /posts/{postId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.authorId == request.auth.uid;
+
+      allow update: if signedIn() && (
+        resource.data.authorId == request.auth.uid
+        || (
+          request.resource.data.diff(resource.data).changedKeys().hasOnly(["likes", "likedBy", "reached20Rewarded", "trendingRewarded"])
+          && request.resource.data.likedBy.hasAll(resource.data.likedBy)
+          && request.resource.data.likes >= resource.data.likes
+        )
+      );
+
+      allow delete: if signedIn() && (
+        resource.data.authorId == request.auth.uid
+        || isCommunityAdminById(resource.data.community)
+      );
+
+      match /comments/{commentId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.authorId == request.auth.uid;
+
+        allow update: if signedIn() && (
+          resource.data.authorId == request.auth.uid
+          || (
+            request.resource.data.diff(resource.data).changedKeys().hasOnly(["likes", "likedBy", "helpful", "helpfulMarkedBy"])
+            && request.resource.data.likes >= resource.data.likes
+          )
+        );
+
+        allow delete: if signedIn() && (
+          resource.data.authorId == request.auth.uid
+          || isCommunityAdminById(get(/databases/$(database)/documents/posts/$(postId)).data.community)
+        );
+      }
+    }
+
+    match /messages/{messageId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.senderId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.senderId == request.auth.uid
+        && request.resource.data.senderId == resource.data.senderId
+        && request.resource.data.roomId == resource.data.roomId;
+      allow delete: if signedIn()
+        && resource.data.senderId == request.auth.uid;
+    }
+
+    match /studyRooms/{roomId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update: if signedIn();
+      allow delete: if signedIn();
+
+      match /messages/{messageId} {
+        allow read: if signedIn();
+        allow create: if signedIn();
+        allow update: if signedIn();
+        allow delete: if signedIn();
+      }
+    }
+  }
+}

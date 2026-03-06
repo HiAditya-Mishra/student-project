@@ -10,6 +10,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { rewardLoginStreak } from "@/lib/rewards";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -17,6 +18,7 @@ export default function LoginPage() {
 
   const routeLoggedInUser = useCallback(async (uid: string) => {
     const userDoc = await getDoc(doc(db, "users", uid));
+    await rewardLoginStreak(uid);
     router.replace(userDoc.exists() ? "/feed" : "/profile-setup");
   }, [router]);
 

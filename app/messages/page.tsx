@@ -5,15 +5,17 @@ import Navbar from "@/components/navbar";
 import { auth, db } from "@/lib/firebase";
 import { normalizeHandle } from "@/lib/profile";
 import { onAuthStateChanged } from "firebase/auth";
-import { addDoc, collection, onSnapshot, orderBy, query, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "firebase/firestore";
 
 type Message = {
   id: string;
   roomId?: string;
   text?: string;
+  imageUrl?: string;
   senderId?: string;
   senderName?: string;
   createdAt?: { seconds?: number };
+  editedAt?: { seconds?: number };
 };
 
 type UserItem = {
@@ -47,7 +49,42 @@ export default function MessagesPage() {
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState("");
+  const [draftImageUrl, setDraftImageUrl] = useState("");
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
+  const [editingImageUrl, setEditingImageUrl] = useState("");
+  const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  const optimizeImage = async (file: File) => {
+    const raw = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Failed to read image"));
+      reader.readAsDataURL(file);
+    });
+
+    const source = new Image();
+    source.src = raw;
+    await new Promise<void>((resolve, reject) => {
+      source.onload = () => resolve();
+      source.onerror = () => reject(new Error("Failed to load image"));
+    });
+
+    const maxSize = 1000;
+    const scale = Math.min(1, maxSize / Math.max(source.naturalWidth, source.naturalHeight));
+    const width = Math.max(1, Math.round(source.naturalWidth * scale));
+    const height = Math.max(1, Math.round(source.naturalHeight * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return raw;
+    ctx.drawImage(source, 0, 0, width, height);
+    return canvas.toDataURL("image/jpeg", 0.82);
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -166,20 +203,91 @@ export default function MessagesPage() {
       alert("Pick a username first.");
       return;
     }
-    if (!draft.trim()) return;
+    const trimmed = draft.trim();
+    if (!trimmed && !draftImageUrl) return;
 
     try {
       await addDoc(collection(db, "messages"), {
         roomId: selectedRoom,
-        text: draft.trim(),
+        text: trimmed,
+        imageUrl: draftImageUrl || "",
         senderId: user.uid,
         senderName: user.displayName || "Campus User",
         createdAt: serverTimestamp(),
       });
       setDraft("");
+      setDraftImageUrl("");
+      setUploadError(null);
     } catch (sendError) {
       console.error(sendError);
       alert("Could not send message.");
+    }
+  };
+
+  const onDraftImageChange = async (file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setUploadError("Please select an image file.");
+      return;
+    }
+
+    try {
+      const optimized = await optimizeImage(file);
+      setDraftImageUrl(optimized);
+      setUploadError(null);
+    } catch (imageError) {
+      console.error(imageError);
+      setUploadError("Could not process image.");
+    }
+  };
+
+  const startEdit = (message: Message) => {
+    setEditingMessageId(message.id);
+    setEditingText(message.text || "");
+    setEditingImageUrl(message.imageUrl || "");
+    setUploadError(null);
+  };
+
+  const saveEdit = async () => {
+    if (!editingMessageId) return;
+    const trimmed = editingText.trim();
+    if (!trimmed && !editingImageUrl) {
+      alert("Message cannot be empty.");
+      return;
+    }
+
+    try {
+      setSavingMessageId(editingMessageId);
+      await updateDoc(doc(db, "messages", editingMessageId), {
+        text: trimmed,
+        imageUrl: editingImageUrl || "",
+        editedAt: serverTimestamp(),
+      });
+      setEditingMessageId(null);
+      setEditingText("");
+      setEditingImageUrl("");
+    } catch (editError) {
+      console.error(editError);
+      alert("Could not edit message.");
+    } finally {
+      setSavingMessageId(null);
+    }
+  };
+
+  const deleteOwnMessage = async (messageId: string) => {
+    try {
+      setSavingMessageId(messageId);
+      await deleteDoc(doc(db, "messages", messageId));
+      if (editingMessageId === messageId) {
+        setEditingMessageId(null);
+        setEditingText("");
+        setEditingImageUrl("");
+      }
+    } catch (deleteError) {
+      console.error(deleteError);
+      alert("Could not delete message.");
+    } finally {
+      setSavingMessageId(null);
     }
   };
 
@@ -250,6 +358,7 @@ export default function MessagesPage() {
               visibleMessages.length ? (
                 visibleMessages.map((message) => {
                   const mine = message.senderId === currentUserId;
+                  const inEditMode = editingMessageId === message.id;
                   return (
                     <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                       <div
@@ -258,10 +367,106 @@ export default function MessagesPage() {
                         }`}
                       >
                         {!mine ? <p className="mb-0.5 text-[11px] text-[#7dd3fc]">{message.senderName || "Campus User"}</p> : null}
-                        <p className="whitespace-pre-wrap break-words">{message.text}</p>
+                        {inEditMode ? (
+                          <div className="space-y-2">
+                            <input
+                              value={editingText}
+                              onChange={(event) => setEditingText(event.target.value)}
+                              className="w-full rounded border border-white/30 bg-black/20 px-2 py-1 text-sm outline-none"
+                            />
+                            {editingImageUrl ? (
+                              <img
+                                src={editingImageUrl}
+                                alt="Edited attachment"
+                                className="max-h-52 w-full rounded-lg border border-white/25 object-cover"
+                              />
+                            ) : null}
+                            <div className="flex items-center gap-2">
+                              <label className="cursor-pointer rounded border border-white/30 px-2 py-1 text-[11px]">
+                                Image
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={async (event) => {
+                                    const file = event.target.files?.[0] ?? null;
+                                    if (!file) return;
+                                    try {
+                                      const optimized = await optimizeImage(file);
+                                      setEditingImageUrl(optimized);
+                                    } catch (imageError) {
+                                      console.error(imageError);
+                                      setUploadError("Could not process image.");
+                                    }
+                                  }}
+                                />
+                              </label>
+                              {editingImageUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingImageUrl("")}
+                                  className="rounded border border-white/30 px-2 py-1 text-[11px]"
+                                >
+                                  Remove Image
+                                </button>
+                              ) : null}
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void saveEdit()}
+                                disabled={savingMessageId === message.id}
+                                className="rounded border border-white/30 px-2 py-1 text-[11px]"
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingMessageId(null);
+                                  setEditingText("");
+                                  setEditingImageUrl("");
+                                }}
+                                className="rounded border border-white/30 px-2 py-1 text-[11px]"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {message.text ? <p className="whitespace-pre-wrap break-words">{message.text}</p> : null}
+                            {message.imageUrl ? (
+                              <img
+                                src={message.imageUrl}
+                                alt="Message attachment"
+                                className="mt-1 max-h-56 w-full rounded-lg border border-white/20 object-cover"
+                              />
+                            ) : null}
+                          </>
+                        )}
                         <p className={`mt-1 text-[10px] ${mine ? "text-blue-100" : "text-gray-400"}`}>
-                          {formatMessageTime(message.createdAt?.seconds)}
+                          {formatMessageTime(message.createdAt?.seconds)}{message.editedAt ? " (edited)" : ""}
                         </p>
+                        {mine && !inEditMode ? (
+                          <div className="mt-1 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => startEdit(message)}
+                              className="rounded border border-white/30 px-2 py-0.5 text-[10px]"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void deleteOwnMessage(message.id)}
+                              disabled={savingMessageId === message.id}
+                              className="rounded border border-red-300/50 px-2 py-0.5 text-[10px] text-red-100"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   );
@@ -280,7 +485,29 @@ export default function MessagesPage() {
           </div>
 
           <form onSubmit={send} className="border-t border-[#222833] bg-[#0f141b] p-3">
+            {draftImageUrl ? (
+              <div className="mb-2 flex items-center gap-2">
+                <img src={draftImageUrl} alt="Draft attachment" className="h-14 w-14 rounded-lg border border-[#2c3442] object-cover" />
+                <button
+                  type="button"
+                  onClick={() => setDraftImageUrl("")}
+                  className="rounded border border-[#2c3442] px-2 py-1 text-[11px] text-gray-300"
+                >
+                  Remove image
+                </button>
+              </div>
+            ) : null}
             <div className="flex gap-2">
+              <label className="cursor-pointer rounded-full border border-[#2c3442] bg-[#0a0f15] px-3 py-2 text-xs text-gray-200">
+                Image
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={!selectedRoom}
+                  onChange={(event) => void onDraftImageChange(event.target.files?.[0] ?? null)}
+                />
+              </label>
               <input
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -296,6 +523,7 @@ export default function MessagesPage() {
                 Send
               </button>
             </div>
+            {uploadError ? <p className="mt-2 text-xs text-red-300">{uploadError}</p> : null}
           </form>
         </section>
       </main>

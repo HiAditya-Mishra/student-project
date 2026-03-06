@@ -19,7 +19,7 @@ import {
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { normalizeHandle } from "@/lib/profile";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 type PrivacyType = "public" | "private" | "invite";
 type CommunityTab = "posts" | "trending" | "events" | "members" | "leaderboard";
@@ -42,6 +42,7 @@ type Community = {
   bannedUserIds?: string[];
   events?: string[];
   ownerId?: string;
+  inviteCode?: string;
 };
 
 type Post = {
@@ -89,6 +90,7 @@ function privacyIcon(privacy?: PrivacyType) {
 
 export default function CommunitiesPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [communities, setCommunities] = useState<Community[]>([]);
   const [joined, setJoined] = useState<Record<string, boolean>>({});
   const [currentUserId, setCurrentUserId] = useState<string>("");
@@ -102,6 +104,8 @@ export default function CommunitiesPage() {
   const [joinBusy, setJoinBusy] = useState(false);
   const [expandedPost, setExpandedPost] = useState<Post | null>(null);
   const [expandedPostComments, setExpandedPostComments] = useState<Comment[]>([]);
+  const [inviteUnlockedByCommunity, setInviteUnlockedByCommunity] = useState<Record<string, boolean>>({});
+  const [inviteNotice, setInviteNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let profileUnsub: (() => void) | null = null;
@@ -226,6 +230,28 @@ export default function CommunitiesPage() {
     [communities, selected],
   );
 
+  useEffect(() => {
+    const token = searchParams.get("invite");
+    if (!token) return;
+    const [communityId, code] = token.split(":");
+    if (!communityId || !code) {
+      setInviteNotice("Invite link is invalid.");
+      return;
+    }
+
+    const target = communities.find((community) => community.id === communityId);
+    if (!target) return;
+
+    setSelected(communityId);
+    if (!target.inviteCode || target.inviteCode !== code) {
+      setInviteNotice("Invite code is invalid or expired.");
+      return;
+    }
+
+    setInviteUnlockedByCommunity((prev) => ({ ...prev, [communityId]: true }));
+    setInviteNotice(`Invite verified for ${target.name}. You can now join.`);
+  }, [communities, searchParams]);
+
   const filteredCommunityPosts = useMemo(
     () => posts.filter((post) => post.community === selectedCommunity?.id),
     [posts, selectedCommunity?.id],
@@ -287,8 +313,11 @@ export default function CommunitiesPage() {
   }, [filteredCommunityPosts]);
 
   const leaderboard = [...memberRows].sort((a, b) => b.likes - a.likes).slice(0, 10);
+  const isOwner = Boolean(currentUserId && selectedCommunity?.ownerId === currentUserId);
   const isMod = Boolean(currentUserId && selectedCommunity?.modIds?.includes(currentUserId));
+  const isAdmin = isOwner || isMod;
   const isJoinedSelected = Boolean(selectedCommunity && joined[selectedCommunity.id]);
+  const inviteUnlockedForSelected = Boolean(selectedCommunity && inviteUnlockedByCommunity[selectedCommunity.id]);
 
   const getMembersCount = (community: Community) => {
     if (typeof community.membersCount === "number") return community.membersCount;
@@ -344,8 +373,10 @@ export default function CommunitiesPage() {
     return () => unsubscribe();
   }, [expandedPost?.id]);
 
-  const toggleJoin = async () => {
-    if (!currentUserId || !selectedCommunity) {
+  const toggleJoin = async (options?: { communityId?: string; forceInviteAccess?: boolean }) => {
+    const targetCommunityId = options?.communityId || selectedCommunity?.id;
+    const targetCommunity = communities.find((community) => community.id === targetCommunityId) || selectedCommunity;
+    if (!currentUserId || !targetCommunity || !targetCommunityId) {
       alert("Please login first.");
       return;
     }
@@ -353,7 +384,7 @@ export default function CommunitiesPage() {
 
     try {
       setJoinBusy(true);
-      const communityRef = doc(db, "communities", selectedCommunity.id);
+      const communityRef = doc(db, "communities", targetCommunityId);
       const userRef = doc(db, "users", currentUserId);
 
       await runTransaction(db, async (tx) => {
@@ -363,6 +394,27 @@ export default function CommunitiesPage() {
         const currentMemberIds = Array.isArray(raw.memberIds) ? raw.memberIds : [];
         const currentOnlineIds = Array.isArray(raw.onlineMemberIds) ? raw.onlineMemberIds : [];
         const currentlyJoined = currentMemberIds.includes(currentUserId);
+        const privacy = raw.privacy || "public";
+        const isTargetOwner = raw.ownerId === currentUserId;
+        const isTargetMod = Array.isArray(raw.modIds) && raw.modIds.includes(currentUserId);
+        const canBypassPrivacy = isTargetOwner || isTargetMod;
+        const hasInviteAccess =
+          options?.forceInviteAccess ||
+          inviteUnlockedByCommunity[targetCommunityId] ||
+          (raw.inviteCode && searchParams.get("invite") === `${targetCommunityId}:${raw.inviteCode}`);
+
+        if (!currentlyJoined) {
+          if (privacy === "private" && !canBypassPrivacy) {
+            throw new Error("PRIVATE_JOIN_BLOCKED");
+          }
+          if (privacy === "invite" && !canBypassPrivacy && !hasInviteAccess) {
+            throw new Error("INVITE_REQUIRED");
+          }
+        }
+
+        if (Array.isArray(raw.bannedUserIds) && raw.bannedUserIds.includes(currentUserId)) {
+          throw new Error("BANNED_USER");
+        }
 
         const nextMemberIds = currentlyJoined
           ? currentMemberIds.filter((id) => id !== currentUserId)
@@ -386,8 +438,8 @@ export default function CommunitiesPage() {
         const userData = (userSnap.exists() ? userSnap.data() : {}) as UserDocLite;
         const following = Array.isArray(userData.followingCommunities) ? userData.followingCommunities : [];
         const nextFollowing = currentlyJoined
-          ? following.filter((id) => id !== selectedCommunity.id)
-          : Array.from(new Set([...following, selectedCommunity.id]));
+          ? following.filter((id) => id !== targetCommunityId)
+          : Array.from(new Set([...following, targetCommunityId]));
         tx.set(
           userRef,
           {
@@ -399,6 +451,19 @@ export default function CommunitiesPage() {
       });
     } catch (error) {
       console.error(error);
+      const code = error instanceof Error ? error.message : "";
+      if (code === "PRIVATE_JOIN_BLOCKED") {
+        alert("Only creator/mods can add members in private communities.");
+        return;
+      }
+      if (code === "INVITE_REQUIRED") {
+        alert("This community needs a valid invite link.");
+        return;
+      }
+      if (code === "BANNED_USER") {
+        alert("You are banned from this community.");
+        return;
+      }
       alert("Could not update membership.");
     } finally {
       setJoinBusy(false);
@@ -406,7 +471,7 @@ export default function CommunitiesPage() {
   };
 
   const handleDeletePost = async (postId: string) => {
-    if (!isMod) return;
+    if (!isAdmin) return;
     try {
       await deleteDoc(doc(db, "posts", postId));
     } catch (error) {
@@ -416,7 +481,7 @@ export default function CommunitiesPage() {
   };
 
   const handleBanUser = async (userId?: string) => {
-    if (!isMod || !userId || !selectedCommunity) return;
+    if (!isAdmin || !userId || !selectedCommunity) return;
     if (userId === currentUserId) {
       alert("You cannot ban yourself.");
       return;
@@ -430,6 +495,47 @@ export default function CommunitiesPage() {
     } catch (error) {
       console.error(error);
       alert("Could not ban user.");
+    }
+  };
+
+  const handleMakeModerator = async (userId: string) => {
+    if (!isAdmin || !selectedCommunity || !userId) return;
+    try {
+      await updateDoc(doc(db, "communities", selectedCommunity.id), {
+        modIds: arrayUnion(userId),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error(error);
+      alert("Could not promote user to moderator.");
+    }
+  };
+
+  const handleDeleteComment = async (postId: string, commentId: string) => {
+    if (!isAdmin) return;
+    try {
+      await deleteDoc(doc(db, "posts", postId, "comments", commentId));
+    } catch (error) {
+      console.error(error);
+      alert("Could not delete comment.");
+    }
+  };
+
+  const handleCopyInviteLink = async () => {
+    if (!selectedCommunity || !isAdmin) return;
+    const inviteCode = selectedCommunity.inviteCode;
+    if (!inviteCode) {
+      alert("Invite link is enabled only for invite-only communities.");
+      return;
+    }
+
+    try {
+      const link = `${window.location.origin}/communities?invite=${selectedCommunity.id}:${inviteCode}`;
+      await navigator.clipboard.writeText(link);
+      alert("Invite link copied.");
+    } catch (error) {
+      console.error(error);
+      alert("Could not copy invite link.");
     }
   };
 
@@ -492,9 +598,16 @@ export default function CommunitiesPage() {
           >
             Create Community
           </button>
+          <div className="rounded-xl border border-[#2f2f2f] bg-[#101010] p-3">
+            <p className="text-sm font-semibold text-[#ff8c42]">Explore Communities</p>
+            <p className="mt-1 text-xs text-gray-500">No community suggestions yet. Discovery algorithm is under development.</p>
+          </div>
         </aside>
 
         <section className="space-y-4">
+          {inviteNotice ? (
+            <div className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-3 text-xs text-[#ffb380]">{inviteNotice}</div>
+          ) : null}
           <div className="overflow-hidden rounded-2xl border border-[#2f2f2f] bg-[#141414]">
             <div className="h-24 px-5 py-4" style={{ background: selectedCommunity.banner }}>
               <div className="flex items-center justify-between">
@@ -509,15 +622,29 @@ export default function CommunitiesPage() {
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => void toggleJoin()}
-                  disabled={joinBusy}
-                  className={`rounded-xl px-4 py-2 text-sm font-semibold ${
-                    isJoinedSelected ? "border border-white/70 bg-black/20" : "bg-[#ff6a00]"
-                  }`}
-                >
-                  {joinBusy ? "Updating..." : isJoinedSelected ? "Leave" : "Join"}
-                </button>
+                <div className="flex items-center gap-2">
+                  {isAdmin ? (
+                    <button
+                      onClick={() => void handleCopyInviteLink()}
+                      className="rounded-xl border border-[#2f2f2f] bg-black/25 px-3 py-2 text-xs text-gray-200 hover:border-[#ff6a00]"
+                    >
+                      Copy Invite Link
+                    </button>
+                  ) : null}
+                  <button
+                    onClick={() => void toggleJoin()}
+                    disabled={
+                      joinBusy ||
+                      (!isJoinedSelected && selectedCommunity.privacy === "private" && !isAdmin) ||
+                      (!isJoinedSelected && selectedCommunity.privacy === "invite" && !inviteUnlockedForSelected && !isAdmin)
+                    }
+                    className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+                      isJoinedSelected ? "border border-white/70 bg-black/20" : "bg-[#ff6a00]"
+                    }`}
+                  >
+                    {joinBusy ? "Updating..." : isJoinedSelected ? "Leave" : "Join"}
+                  </button>
+                </div>
               </div>
             </div>
             <div className="p-4">
@@ -592,7 +719,7 @@ export default function CommunitiesPage() {
                         >
                           Open
                         </button>
-                        {isMod ? (
+                        {isAdmin ? (
                           <button
                             onClick={() => void handleDeletePost(post.id)}
                             className="rounded border border-red-700 px-2 py-1 text-[11px] text-red-300"
@@ -600,7 +727,7 @@ export default function CommunitiesPage() {
                             Delete
                           </button>
                         ) : null}
-                        {isMod && post.authorId && post.authorId !== currentUserId ? (
+                        {isAdmin && post.authorId && post.authorId !== currentUserId ? (
                           <button
                             onClick={() => void handleBanUser(post.authorId)}
                             className="rounded border border-yellow-700 px-2 py-1 text-[11px] text-yellow-300"
@@ -677,6 +804,28 @@ export default function CommunitiesPage() {
                   <div key={member.id} className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-3">
                     <p className="font-semibold">{member.name}</p>
                     <p className="text-xs text-gray-400">@{member.handle} | {member.online ? "Online" : "Offline"}</p>
+                    {isAdmin && member.id !== currentUserId ? (
+                      <div className="mt-2 flex gap-2">
+                        {selectedCommunity.modIds?.includes(member.id) ? (
+                          <span className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-[#7dd3fc]">Moderator</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void handleMakeModerator(member.id)}
+                            className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-gray-300 hover:border-[#5bc0ff]"
+                          >
+                            Make Mod
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => void handleBanUser(member.id)}
+                          className="rounded border border-yellow-700 px-2 py-1 text-[11px] text-yellow-300"
+                        >
+                          Ban
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ))
               ) : (
@@ -740,6 +889,15 @@ export default function CommunitiesPage() {
                       <p className="text-xs text-[#ff8c42]">{comment.author || "Aspirant"}</p>
                       <p className="mt-1 whitespace-pre-wrap text-sm text-gray-200">{comment.content || "..."}</p>
                       <p className="mt-1 text-[11px] text-gray-500">{comment.likes ?? 0} upvotes</p>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteComment(expandedPost.id, comment.id)}
+                          className="mt-2 rounded border border-red-700 px-2 py-1 text-[11px] text-red-300"
+                        >
+                          Delete Message
+                        </button>
+                      ) : null}
                     </div>
                   ))
                 ) : (

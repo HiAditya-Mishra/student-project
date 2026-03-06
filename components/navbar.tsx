@@ -3,7 +3,9 @@
 import { FormEvent, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { User, onAuthStateChanged, signOut } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { doc, onSnapshot } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
+import { resolveAvatar } from "@/lib/profile";
 
 const links = [
   { label: "Feed", href: "/feed" },
@@ -19,10 +21,33 @@ export default function Navbar() {
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [searchInput, setSearchInput] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
+    let profileUnsub: (() => void) | null = null;
+
+    const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+      setUser(nextUser);
+      if (profileUnsub) {
+        profileUnsub();
+        profileUnsub = null;
+      }
+
+      if (!nextUser) {
+        setAvatarUrl("");
+        return;
+      }
+
+      profileUnsub = onSnapshot(doc(db, "users", nextUser.uid), (snapshot) => {
+        const data = snapshot.exists() ? snapshot.data() as { avatarUrl?: string; avatarSeed?: string } : {};
+        setAvatarUrl(resolveAvatar(data, nextUser.uid));
+      });
+    });
+
+    return () => {
+      if (profileUnsub) profileUnsub();
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -77,16 +102,20 @@ export default function Navbar() {
         <div className="ml-auto flex items-center gap-3">
           <form
             onSubmit={handleSearch}
-            className="hidden items-center rounded-full border border-[#2d2d2d] bg-[#1a1a1a] px-3 py-1.5 sm:flex"
+            className="relative hidden items-center rounded-full border border-[#2d2d2d] bg-[#1a1a1a] sm:flex"
           >
             <input
               placeholder="Search posts or @people"
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              className="w-28 bg-transparent text-sm outline-none placeholder:text-gray-500"
+              className="w-44 rounded-full bg-transparent py-1.5 pl-3 pr-12 text-sm outline-none placeholder:text-gray-500"
             />
-            <button type="submit" className="rounded-full bg-[#ff6a00] px-2 py-0.5 text-xs">
-              Q
+            <button
+              type="submit"
+              className="absolute right-1 rounded-full bg-[#ff6a00] px-3 py-1 text-xs font-semibold text-white"
+              aria-label="Search"
+            >
+              Go
             </button>
           </form>
 
@@ -111,7 +140,11 @@ export default function Navbar() {
                 className="h-9 w-9 rounded-full border border-[#ff8c42] bg-[#1a1a1a] text-sm"
                 title="Profile"
               >
-                U
+                <img
+                  src={avatarUrl || resolveAvatar(undefined, user.uid)}
+                  alt="Profile avatar"
+                  className="h-full w-full rounded-full object-cover"
+                />
               </button>
             </>
           ) : (
