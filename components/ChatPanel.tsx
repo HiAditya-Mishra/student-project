@@ -6,27 +6,27 @@ export default function ChatPanel() {
   const router = useRouter();
 
   return (
-    <div className="h-full flex flex-col bg-white dark:bg-zinc-900 transition-colors duration-300">
-      <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 font-semibold text-indigo-600 dark:text-violet-400">
+    <div className="h-full flex flex-col bg-[#141414] text-white">
+      <div className="border-b border-[#2f2f2f] p-4 font-semibold text-[#ff8c42]">
         Messages
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 text-sm">
-        <div className="bg-slate-100 dark:bg-zinc-800 p-2 rounded-lg">
+      <div className="flex-1 space-y-3 overflow-y-auto p-4 text-sm">
+        <div className="rounded-lg border border-[#2f2f2f] bg-[#101010] p-2 text-gray-300">
           Group and direct chat are now available.
         </div>
         <button
           onClick={() => router.push("/messages")}
-          className="rounded-lg bg-indigo-500 px-3 py-2 text-white"
+          className="rounded-lg bg-[#ff6a00] px-3 py-2 text-white hover:bg-[#ff8c42]"
         >
           Open Messages
         </button>
       </div>
 
-      <div className="p-3 border-t border-zinc-200 dark:border-zinc-800">
+      <div className="border-t border-[#2f2f2f] p-3">
         <input
           placeholder="Type a message..."
-          className="w-full p-2 rounded-lg bg-slate-50 dark:bg-zinc-800 outline-none"
+          className="w-full rounded-lg border border-[#2f2f2f] bg-[#101010] p-2 text-sm outline-none focus:border-[#ff6a00]"
         />
       </div>
     </div>

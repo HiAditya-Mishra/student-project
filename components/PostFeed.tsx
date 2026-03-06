@@ -235,7 +235,6 @@ export default function PostFeed({
   };
 
   const toggleComments = (postId: string) => {
-    if (readOnly) return;
     const nextOpen = !openComments[postId];
     setOpenComments((prev) => ({ ...prev, [postId]: nextOpen }));
 
@@ -677,7 +676,6 @@ export default function PostFeed({
             </button>
             <button
               onClick={() => toggleComments(post.id)}
-              disabled={readOnly}
               className="rounded-lg border border-[#2f2f2f] px-3 py-1 hover:border-[#ff6a00]"
             >
               Comment {commentsByPost[post.id]?.length ? `(${commentsByPost[post.id].length})` : ""}
@@ -701,7 +699,7 @@ export default function PostFeed({
             ) : null}
           </div>
 
-          {!readOnly && openComments[post.id] ? (
+          {openComments[post.id] ? (
             <div className="mt-4 space-y-3 rounded-xl border border-[#2a2a2a] bg-[#0f0f0f] p-3">
               <div className="space-y-2">
                 {(commentsByPost[post.id] ?? []).length ? (
@@ -723,6 +721,7 @@ export default function PostFeed({
                         <button
                           onClick={() => void handleCommentUpvote(post.id, comment.id)}
                           disabled={
+                            readOnly ||
                             updatingCommentId === comment.id ||
                             (comment.likedBy ?? []).includes(auth.currentUser?.uid ?? "")
                           }
@@ -734,7 +733,7 @@ export default function PostFeed({
                         </button>
                         <button
                           onClick={() => void handleMarkHelpful(post, comment)}
-                          disabled={comment.helpful || markingHelpfulCommentId === comment.id}
+                          disabled={readOnly || comment.helpful || markingHelpfulCommentId === comment.id}
                           className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-green-300 hover:border-green-500 disabled:opacity-60"
                         >
                           {comment.helpful ? "Helpful" : "Mark Helpful"}
@@ -747,58 +746,68 @@ export default function PostFeed({
                 )}
               </div>
 
-              <div className="flex gap-2">
-                <input
-                  ref={(node) => {
-                    commentInputRefs.current[post.id] = node;
-                  }}
-                  value={commentDrafts[post.id] ?? ""}
-                  onChange={(e) =>
-                    setCommentDraftWithMention(post.id, e.target.value, e.target.selectionStart ?? e.target.value.length)
-                  }
-                  onKeyDown={(e) => {
-                    const options = getCommentMentionOptions(post.id);
-                    const context = commentMentionContext[post.id];
-                    if (!context || !options.length) return;
+              {!readOnly ? (
+                <div className="flex gap-2">
+                  <input
+                    ref={(node) => {
+                      commentInputRefs.current[post.id] = node;
+                    }}
+                    value={commentDrafts[post.id] ?? ""}
+                    onChange={(e) =>
+                      setCommentDraftWithMention(post.id, e.target.value, e.target.selectionStart ?? e.target.value.length)
+                    }
+                    onKeyDown={(e) => {
+                      const options = getCommentMentionOptions(post.id);
+                      const context = commentMentionContext[post.id];
+                      if (context && options.length) {
+                        if (e.key === "ArrowDown") {
+                          e.preventDefault();
+                          setCommentMentionIndex((prev) => ({
+                            ...prev,
+                            [post.id]: ((prev[post.id] ?? 0) + 1) % options.length,
+                          }));
+                          return;
+                        }
+                        if (e.key === "ArrowUp") {
+                          e.preventDefault();
+                          setCommentMentionIndex((prev) => ({
+                            ...prev,
+                            [post.id]: ((prev[post.id] ?? 0) - 1 + options.length) % options.length,
+                          }));
+                          return;
+                        }
+                        if (e.key === "Enter" || e.key === "Tab") {
+                          e.preventDefault();
+                          const selected = options[commentMentionIndex[post.id] ?? 0];
+                          if (selected) applyCommentMention(post.id, selected.handle);
+                          return;
+                        }
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          setCommentMentionContext((prev) => ({ ...prev, [post.id]: null }));
+                          return;
+                        }
+                      }
 
-                    if (e.key === "ArrowDown") {
-                      e.preventDefault();
-                      setCommentMentionIndex((prev) => ({
-                        ...prev,
-                        [post.id]: ((prev[post.id] ?? 0) + 1) % options.length,
-                      }));
-                      return;
-                    }
-                    if (e.key === "ArrowUp") {
-                      e.preventDefault();
-                      setCommentMentionIndex((prev) => ({
-                        ...prev,
-                        [post.id]: ((prev[post.id] ?? 0) - 1 + options.length) % options.length,
-                      }));
-                      return;
-                    }
-                    if (e.key === "Enter" || e.key === "Tab") {
-                      e.preventDefault();
-                      const selected = options[commentMentionIndex[post.id] ?? 0];
-                      if (selected) applyCommentMention(post.id, selected.handle);
-                      return;
-                    }
-                    if (e.key === "Escape") {
-                      e.preventDefault();
-                      setCommentMentionContext((prev) => ({ ...prev, [post.id]: null }));
-                    }
-                  }}
-                  placeholder="Write a comment..."
-                  className="flex-1 rounded-lg border border-[#2f2f2f] bg-[#141414] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
-                />
-                <button
-                  onClick={() => void submitComment(post.id)}
-                  disabled={submittingCommentPostId === post.id}
-                  className="rounded-lg bg-[#ff6a00] px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                >
-                  {submittingCommentPostId === post.id ? "Posting..." : "Post"}
-                </button>
-              </div>
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        void submitComment(post.id);
+                      }
+                    }}
+                    placeholder="Write a comment..."
+                    className="flex-1 rounded-lg border border-[#2f2f2f] bg-[#141414] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+                  />
+                  <button
+                    onClick={() => void submitComment(post.id)}
+                    disabled={submittingCommentPostId === post.id}
+                    className="rounded-lg bg-[#ff6a00] px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  >
+                    {submittingCommentPostId === post.id ? "Posting..." : "Post"}
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500">Switch to Public Profile to add or upvote comments.</p>
+              )}
               {commentMentionContext[post.id] && getCommentMentionOptions(post.id).length ? (
                 <div className="rounded-lg border border-[#2f2f2f] bg-[#121212] p-1">
                   {getCommentMentionOptions(post.id).map((user, index) => (

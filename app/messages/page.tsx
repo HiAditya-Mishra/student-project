@@ -54,6 +54,7 @@ export default function MessagesPage() {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [editingImageUrl, setEditingImageUrl] = useState("");
+  const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
   const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -245,6 +246,7 @@ export default function MessagesPage() {
     setEditingMessageId(message.id);
     setEditingText(message.text || "");
     setEditingImageUrl(message.imageUrl || "");
+    setOpenActionMenuId(null);
     setUploadError(null);
   };
 
@@ -277,6 +279,7 @@ export default function MessagesPage() {
   const deleteOwnMessage = async (messageId: string) => {
     try {
       setSavingMessageId(messageId);
+      setOpenActionMenuId(null);
       await deleteDoc(doc(db, "messages", messageId));
       if (editingMessageId === messageId) {
         setEditingMessageId(null);
@@ -292,17 +295,17 @@ export default function MessagesPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0f1115] text-white">
+    <div className="min-h-screen bg-[#0f0f0f] text-white">
       <Navbar />
       <main className="mx-auto grid h-[calc(100vh-4rem)] w-full max-w-7xl gap-4 px-4 py-4 md:grid-cols-[320px_1fr]">
-        <aside className="flex h-full flex-col overflow-hidden rounded-2xl border border-[#2a2f38] bg-[#11161d]">
-          <div className="border-b border-[#222833] p-4">
-            <h2 className="text-lg font-semibold text-[#7dd3fc]">Chats</h2>
+        <aside className="flex h-full flex-col overflow-hidden rounded-2xl border border-[#2f2f2f] bg-[#141414]">
+          <div className="border-b border-[#2a2a2a] p-4">
+            <h2 className="text-lg font-semibold text-[#ff8c42]">Chats</h2>
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search username or @handle"
-              className="mt-3 w-full rounded-xl border border-[#2c3442] bg-[#0c1117] px-3 py-2 text-sm outline-none focus:border-[#38bdf8]"
+              className="mt-3 w-full rounded-xl border border-[#2f2f2f] bg-[#0f0f0f] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
             />
           </div>
 
@@ -317,10 +320,10 @@ export default function MessagesPage() {
                     key={room.id}
                     onClick={() => setSelectedRoom(room.id)}
                     className={`mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition ${
-                      isActive ? "bg-[#1f2a38]" : "hover:bg-[#18202a]"
+                      isActive ? "bg-[#24170f]" : "hover:bg-[#1a1a1a]"
                     }`}
                   >
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#0b2a3b] text-sm font-semibold text-[#7dd3fc]">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#29180f] text-sm font-semibold text-[#ff9e58]">
                       {room.name.slice(0, 1).toUpperCase()}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -334,17 +337,20 @@ export default function MessagesPage() {
                 );
               })
             ) : (
-              <p className="rounded-xl border border-[#2c3442] bg-[#0c1117] p-3 text-xs text-gray-400">
+              <p className="rounded-xl border border-[#2f2f2f] bg-[#0f0f0f] p-3 text-xs text-gray-400">
                 No users found. Try searching with username.
               </p>
             )}
           </div>
         </aside>
 
-        <section className="flex h-full flex-col overflow-hidden rounded-2xl border border-[#2a2f38] bg-[#0f141b]">
-          <div className="flex items-center justify-between border-b border-[#222833] px-4 py-3">
+        <section
+          className="flex h-full flex-col overflow-hidden rounded-2xl border border-[#2f2f2f] bg-[#121212]"
+          onClick={() => setOpenActionMenuId(null)}
+        >
+          <div className="flex items-center justify-between border-b border-[#2a2a2a] px-4 py-3">
             <div>
-              <p className="text-sm font-semibold text-[#7dd3fc]">{selectedRoomName}</p>
+              <p className="text-sm font-semibold text-[#ff8c42]">{selectedRoomName}</p>
               <p className="text-xs text-gray-500">
                 {selectedRoomMeta ? `Chatting with @${selectedRoomMeta.handle}` : "Direct message"}
               </p>
@@ -353,7 +359,7 @@ export default function MessagesPage() {
 
           {error ? <p className="px-4 pt-3 text-sm text-red-300">{error}</p> : null}
 
-          <div className="flex-1 space-y-2 overflow-y-auto bg-[#0b1016] p-4">
+          <div className="flex-1 space-y-2 overflow-y-auto bg-[#0f0f0f] p-4">
             {selectedRoom ? (
               visibleMessages.length ? (
                 visibleMessages.map((message) => {
@@ -363,10 +369,11 @@ export default function MessagesPage() {
                     <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                       <div
                         className={`max-w-[78%] rounded-2xl px-3 py-2 text-sm ${
-                          mine ? "bg-[#1d4ed8] text-white" : "bg-[#1b2430] text-gray-100"
+                          mine ? "bg-[#ff6a00] text-white" : "bg-[#1b1b1b] text-gray-100"
                         }`}
+                        onClick={(event) => event.stopPropagation()}
                       >
-                        {!mine ? <p className="mb-0.5 text-[11px] text-[#7dd3fc]">{message.senderName || "Campus User"}</p> : null}
+                        {!mine ? <p className="mb-0.5 text-[11px] text-[#ff9e58]">{message.senderName || "Campus User"}</p> : null}
                         {inEditMode ? (
                           <div className="space-y-2">
                             <input
@@ -445,28 +452,49 @@ export default function MessagesPage() {
                             ) : null}
                           </>
                         )}
-                        <p className={`mt-1 text-[10px] ${mine ? "text-blue-100" : "text-gray-400"}`}>
-                          {formatMessageTime(message.createdAt?.seconds)}{message.editedAt ? " (edited)" : ""}
-                        </p>
                         {mine && !inEditMode ? (
-                          <div className="mt-1 flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => startEdit(message)}
-                              className="rounded border border-white/30 px-2 py-0.5 text-[10px]"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void deleteOwnMessage(message.id)}
-                              disabled={savingMessageId === message.id}
-                              className="rounded border border-red-300/50 px-2 py-0.5 text-[10px] text-red-100"
-                            >
-                              Delete
-                            </button>
+                          <div className="mt-1 flex items-center justify-between gap-2">
+                            <p className="text-[10px] text-orange-100">
+                              {formatMessageTime(message.createdAt?.seconds)}{message.editedAt ? " (edited)" : ""}
+                            </p>
+                            <div className="relative">
+                              <button
+                                type="button"
+                                aria-label="Open message actions"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setOpenActionMenuId((prev) => (prev === message.id ? null : message.id));
+                                }}
+                                className="rounded-md border border-white/30 px-1.5 py-0.5 text-[10px] leading-none text-white/90 hover:bg-white/10"
+                              >
+                                v
+                              </button>
+                              {openActionMenuId === message.id ? (
+                                <div className="absolute right-0 z-20 mt-1 w-28 rounded-lg border border-[#2f2f2f] bg-[#151515] p-1 shadow-lg">
+                                  <button
+                                    type="button"
+                                    onClick={() => startEdit(message)}
+                                    className="w-full rounded px-2 py-1 text-left text-[11px] text-gray-100 hover:bg-[#232323]"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void deleteOwnMessage(message.id)}
+                                    disabled={savingMessageId === message.id}
+                                    className="mt-1 w-full rounded px-2 py-1 text-left text-[11px] text-red-300 hover:bg-[#2a1616] disabled:opacity-60"
+                                  >
+                                    {savingMessageId === message.id ? "Deleting..." : "Delete"}
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
-                        ) : null}
+                        ) : (
+                          <p className={`mt-1 text-[10px] ${mine ? "text-orange-100" : "text-gray-400"}`}>
+                            {formatMessageTime(message.createdAt?.seconds)}{message.editedAt ? " (edited)" : ""}
+                          </p>
+                        )}
                       </div>
                     </div>
                   );
@@ -484,21 +512,21 @@ export default function MessagesPage() {
             <div ref={bottomRef} />
           </div>
 
-          <form onSubmit={send} className="border-t border-[#222833] bg-[#0f141b] p-3">
+          <form onSubmit={send} className="border-t border-[#2a2a2a] bg-[#121212] p-3">
             {draftImageUrl ? (
               <div className="mb-2 flex items-center gap-2">
-                <img src={draftImageUrl} alt="Draft attachment" className="h-14 w-14 rounded-lg border border-[#2c3442] object-cover" />
+                <img src={draftImageUrl} alt="Draft attachment" className="h-14 w-14 rounded-lg border border-[#2f2f2f] object-cover" />
                 <button
                   type="button"
                   onClick={() => setDraftImageUrl("")}
-                  className="rounded border border-[#2c3442] px-2 py-1 text-[11px] text-gray-300"
+                  className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-gray-300"
                 >
                   Remove image
                 </button>
               </div>
             ) : null}
             <div className="flex gap-2">
-              <label className="cursor-pointer rounded-full border border-[#2c3442] bg-[#0a0f15] px-3 py-2 text-xs text-gray-200">
+              <label className="cursor-pointer rounded-full border border-[#2f2f2f] bg-[#0f0f0f] px-3 py-2 text-xs text-gray-200">
                 Image
                 <input
                   type="file"
@@ -513,12 +541,12 @@ export default function MessagesPage() {
                 onChange={(event) => setDraft(event.target.value)}
                 placeholder={selectedRoom ? "Type a message" : "Select a user to start DM"}
                 disabled={!selectedRoom}
-                className="flex-1 rounded-full border border-[#2c3442] bg-[#0a0f15] px-4 py-2 text-sm outline-none focus:border-[#38bdf8] disabled:opacity-60"
+                className="flex-1 rounded-full border border-[#2f2f2f] bg-[#0f0f0f] px-4 py-2 text-sm outline-none focus:border-[#ff6a00] disabled:opacity-60"
               />
               <button
                 type="submit"
                 disabled={!selectedRoom}
-                className="rounded-full bg-[#0ea5e9] px-5 py-2 text-sm font-semibold text-[#041018] hover:bg-[#38bdf8] disabled:opacity-60"
+                className="rounded-full bg-[#ff6a00] px-5 py-2 text-sm font-semibold text-white hover:bg-[#ff8c42] disabled:opacity-60"
               >
                 Send
               </button>

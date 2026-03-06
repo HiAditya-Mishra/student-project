@@ -282,6 +282,16 @@ export default function FeedPage() {
 
       <main className="mx-auto grid w-full max-w-7xl gap-6 px-4 py-6 lg:grid-cols-[1fr_320px]">
         <section className="space-y-5">
+          {readOnlyMode ? (
+            <div className="rounded-2xl border border-[#2d2d2d] bg-[#141414] p-4 text-sm text-gray-300">
+              Posting is disabled in incognito mode. Switch to Public Profile to create or interact with posts.
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-[#2d2d2d] bg-[#121212] p-1 shadow-[0_0_22px_rgba(255,106,0,0.14)]">
+              <CreatePost mode="full" />
+            </div>
+          )}
+
           <div className="rounded-2xl border border-[#2b2b2b] bg-[#121212] p-4">
             <p className="text-sm font-semibold text-[#ff8c42]">Live Study Rooms</p>
             <div className="mt-2 flex items-center justify-between rounded-xl border border-[#ff6a00] bg-[#191919] px-3 py-2">
@@ -381,14 +391,6 @@ export default function FeedPage() {
             </p>
             {profileError ? <p className="mt-2 text-xs text-red-300">{profileError}</p> : null}
           </div>
-
-          {readOnlyMode ? (
-            <div className="rounded-2xl border border-[#2d2d2d] bg-[#141414] p-4 text-sm text-gray-300">
-              Posting is disabled in incognito mode. Switch to Public Profile to create or interact with posts.
-            </div>
-          ) : (
-            <CreatePost mode="compact" />
-          )}
 
           <div className="rounded-2xl border border-[#2f2f2f] bg-[#141414] p-4">
             <img
