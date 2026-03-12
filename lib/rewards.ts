@@ -29,6 +29,9 @@ type UserRewardState = {
   lastLoginDate?: string;
   streakInsuranceMonthKey?: string;
   streakInsuranceUsedAt?: string;
+  studyPomodorosCount?: number;
+  studyStreak?: number;
+  lastStudyRewardDate?: string;
   updatedAt?: unknown;
 };
 
@@ -307,4 +310,45 @@ export async function rewardCommentUpvote(authorId: string) {
 
 export async function rewardHelpfulComment(authorId: string) {
   return applySapphireDelta(authorId, 15, false);
+}
+
+export async function rewardStudyPomodoroComplete(userId: string) {
+  const userRef = doc(db, "users", userId);
+  return runTransaction(db, async (tx) => {
+    const snapshot = await tx.get(userRef);
+    const current = (snapshot.exists() ? snapshot.data() : {}) as UserRewardState;
+    const today = dateKey();
+    const yesterday = yesterdayKey();
+    const previousStudyDate = current.lastStudyRewardDate || "";
+    const previousStudyStreak = current.studyStreak || 0;
+
+    let sapphireDelta = 12;
+    let nextStudyStreak = previousStudyStreak;
+
+    if (previousStudyDate !== today) {
+      nextStudyStreak = previousStudyDate === yesterday ? previousStudyStreak + 1 : 1;
+      sapphireDelta += 5;
+      if (nextStudyStreak > 0 && nextStudyStreak % 7 === 0) sapphireDelta += 25;
+      if (nextStudyStreak > 0 && nextStudyStreak % 30 === 0) sapphireDelta += 150;
+    }
+
+    const nextSapphires = Math.max(0, (current.sapphires || 0) + sapphireDelta);
+    const level = getLevelFromSapphires(nextSapphires);
+
+    tx.set(
+      userRef,
+      {
+        studyPomodorosCount: increment(1),
+        lastStudyRewardDate: previousStudyDate === today ? previousStudyDate : today,
+        studyStreak: previousStudyDate === today ? previousStudyStreak : nextStudyStreak,
+        sapphires: nextSapphires,
+        level: level.level,
+        levelTitle: level.title,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    return { sapphireDelta, studyStreak: previousStudyDate === today ? previousStudyStreak : nextStudyStreak };
+  });
 }

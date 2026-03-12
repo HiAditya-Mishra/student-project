@@ -149,6 +149,20 @@ service cloud.firestore {
         allow update: if signedIn();
         allow delete: if signedIn();
       }
+
+      match /resources/{resourceId} {
+        allow read: if signedIn();
+        allow create: if signedIn();
+        allow update: if signedIn();
+        allow delete: if signedIn();
+      }
+
+      match /sessionLogs/{logId} {
+        allow read: if signedIn();
+        allow create: if signedIn();
+        allow update: if signedIn();
+        allow delete: if signedIn();
+      }
     }
   }
 }
