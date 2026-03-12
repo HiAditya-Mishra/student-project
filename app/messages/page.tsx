@@ -45,6 +45,25 @@ function formatMessageTime(seconds?: number) {
   return new Date(seconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function dateKeyFromSeconds(seconds?: number) {
+  if (!seconds) return "";
+  const date = new Date(seconds * 1000);
+  return date.toLocaleDateString([], { year: "numeric", month: "2-digit", day: "2-digit" });
+}
+
+function dayLabelFromSeconds(seconds?: number) {
+  if (!seconds) return "";
+  const date = new Date(seconds * 1000);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (sameDay(date, today)) return "Today";
+  if (sameDay(date, yesterday)) return "Yesterday";
+  return date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+}
+
 export default function MessagesPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [users, setUsers] = useState<UserItem[]>([]);
@@ -198,6 +217,21 @@ export default function MessagesPage() {
     () => messages.filter((message) => message.roomId === selectedRoom),
     [messages, selectedRoom],
   );
+
+  const groupedMessages = useMemo(() => {
+    const groups: Array<{ key: string; label: string; items: Message[] }> = [];
+    visibleMessages.forEach((message) => {
+      const key = dateKeyFromSeconds(message.createdAt?.seconds);
+      const label = dayLabelFromSeconds(message.createdAt?.seconds);
+      const last = groups[groups.length - 1];
+      if (!last || last.key !== key) {
+        groups.push({ key, label, items: [message] });
+      } else {
+        last.items.push(message);
+      }
+    });
+    return groups;
+  }, [visibleMessages]);
 
   const selectedRoomMeta = roomItems.find((room) => room.id === selectedRoom);
   const selectedRoomName = selectedRoomMeta?.name || "Direct Message";
@@ -378,12 +412,19 @@ export default function MessagesPage() {
 
           <div className="flex-1 space-y-2 overflow-y-auto bg-[#0f0f0f] p-4">
             {selectedRoom ? (
-              visibleMessages.length ? (
-                visibleMessages.map((message) => {
-                  const mine = message.senderId === currentUserId;
-                  const inEditMode = editingMessageId === message.id;
-                  return (
-                    <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+              groupedMessages.length ? (
+                groupedMessages.map((group) => (
+                  <div key={group.key || group.label} className="space-y-2">
+                    <div className="flex items-center justify-center">
+                      <span className="rounded-full border border-[#2a2a2a] bg-[#151515] px-3 py-1 text-[11px] text-gray-400">
+                        {group.label}
+                      </span>
+                    </div>
+                    {group.items.map((message) => {
+                      const mine = message.senderId === currentUserId;
+                      const inEditMode = editingMessageId === message.id;
+                      return (
+                        <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                       <div
                         className={`max-w-[78%] rounded-2xl px-3 py-2 text-sm ${
                           mine ? "bg-[#ff6a00] text-white" : "bg-[#1b1b1b] text-gray-100"
@@ -514,8 +555,10 @@ export default function MessagesPage() {
                         )}
                       </div>
                     </div>
-                  );
-                })
+                      );
+                    })}
+                  </div>
+                ))
               ) : (
                 <div className="flex h-full items-center justify-center">
                   <p className="text-sm text-gray-500">No messages yet. Say hi.</p>
