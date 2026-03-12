@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Navbar from "@/components/navbar";
 import { auth, db } from "@/lib/firebase";
-import { normalizeHandle } from "@/lib/profile";
+import { normalizeHandle, resolveAvatar } from "@/lib/profile";
 import { onAuthStateChanged } from "firebase/auth";
 import { addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "firebase/firestore";
 
@@ -22,6 +22,8 @@ type UserItem = {
   id: string;
   name: string;
   handle: string;
+  avatarUrl?: string;
+  avatarSeed?: string;
 };
 
 type RoomItem = {
@@ -30,6 +32,8 @@ type RoomItem = {
   handle: string;
   kind: "dm";
   peerId?: string;
+  avatarUrl?: string;
+  avatarSeed?: string;
 };
 
 function roomIdForPair(a: string, b: string) {
@@ -118,11 +122,18 @@ export default function MessagesPage() {
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "users"), (snapshot) => {
       const nextUsers: UserItem[] = snapshot.docs.map((docSnapshot) => {
-        const data = docSnapshot.data() as { nickname?: string; handle?: string };
+        const data = docSnapshot.data() as {
+          nickname?: string;
+          handle?: string;
+          avatarUrl?: string;
+          avatarSeed?: string;
+        };
         return {
           id: docSnapshot.id,
           name: (data.nickname || "Campus User").trim(),
           handle: normalizeHandle(data.handle || data.nickname || "campus_user"),
+          avatarUrl: data.avatarUrl || "",
+          avatarSeed: data.avatarSeed || docSnapshot.id,
         };
       });
       setUsers(nextUsers);
@@ -140,6 +151,8 @@ export default function MessagesPage() {
         handle: user.handle,
         kind: "dm" as const,
         peerId: user.id,
+        avatarUrl: user.avatarUrl,
+        avatarSeed: user.avatarSeed,
       }));
   }, [users, currentUserId]);
 
@@ -315,6 +328,10 @@ export default function MessagesPage() {
                 const isActive = selectedRoom === room.id;
                 const preview = room.lastMessage?.text || "Start chatting";
                 const previewTime = formatMessageTime(room.lastMessage?.createdAt?.seconds);
+                const avatarSrc = resolveAvatar(
+                  { avatarUrl: room.avatarUrl, avatarSeed: room.avatarSeed },
+                  room.peerId || room.id,
+                );
                 return (
                   <button
                     key={room.id}
@@ -323,8 +340,8 @@ export default function MessagesPage() {
                       isActive ? "bg-[#24170f]" : "hover:bg-[#1a1a1a]"
                     }`}
                   >
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#29180f] text-sm font-semibold text-[#ff9e58]">
-                      {room.name.slice(0, 1).toUpperCase()}
+                    <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-[#3a2a1c] bg-[#29180f]">
+                      <img src={avatarSrc} alt={`${room.name} avatar`} className="h-full w-full object-cover" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
