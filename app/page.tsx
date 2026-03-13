@@ -52,7 +52,7 @@ export default function Home() {
     <div className="flex h-screen items-center justify-center bg-[#0f0f0f] px-4">
       <div className="space-y-6 text-center">
         <h1 className="text-5xl font-bold tracking-wide text-white">
-          Campus<span className="text-[#ff6a00]">Sphere</span>
+          Sph<span className="text-[#ff6a00]">eera</span>
         </h1>
 
         <p className="text-lg text-gray-400">Built by students. For students.</p>

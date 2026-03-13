@@ -149,8 +149,8 @@ export default function MessagesPage() {
         };
         return {
           id: docSnapshot.id,
-          name: (data.nickname || "Campus User").trim(),
-          handle: normalizeHandle(data.handle || data.nickname || "campus_user"),
+          name: (data.nickname || "Spheera User").trim(),
+          handle: normalizeHandle(data.handle || data.nickname || "spheera_user"),
           avatarUrl: data.avatarUrl || "",
           avatarSeed: data.avatarSeed || docSnapshot.id,
         };
@@ -260,7 +260,7 @@ export default function MessagesPage() {
         text: trimmed,
         imageUrl: draftImageUrl || "",
         senderId: user.uid,
-        senderName: user.displayName || "Campus User",
+        senderName: user.displayName || "Spheera User",
         createdAt: serverTimestamp(),
       });
       setDraft("");
@@ -431,7 +431,7 @@ export default function MessagesPage() {
                         }`}
                         onClick={(event) => event.stopPropagation()}
                       >
-                        {!mine ? <p className="mb-0.5 text-[11px] text-[#ff9e58]">{message.senderName || "Campus User"}</p> : null}
+                        {!mine ? <p className="mb-0.5 text-[11px] text-[#ff9e58]">{message.senderName || "Spheera User"}</p> : null}
                         {inEditMode ? (
                           <div className="space-y-2">
                             <input
@@ -618,3 +618,5 @@ export default function MessagesPage() {
     </div>
   );
 }
+
+

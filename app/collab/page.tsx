@@ -57,7 +57,7 @@ export default function CollabPage() {
         skills: skills.split(",").map((item) => item.trim()).filter(Boolean).slice(0, 10),
         description: description.trim(),
         authorId: user.uid,
-        authorName: user.displayName || "Campus User",
+        authorName: user.displayName || "Spheera User",
         createdAt: serverTimestamp(),
       });
       setTitle("");
@@ -87,7 +87,7 @@ export default function CollabPage() {
                   <p className="text-lg font-semibold">{listing.title || "Untitled Project"}</p>
                   <p className="text-sm text-gray-300">Role: {listing.role || "-"}</p>
                   <p className="text-sm text-gray-300">Timeline: {listing.timeline || "-"}</p>
-                  <p className="mt-2 text-xs text-gray-500">By {listing.authorName || "Campus User"}</p>
+                  <p className="mt-2 text-xs text-gray-500">By {listing.authorName || "Spheera User"}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {(listing.skills ?? []).map((skill) => (
                       <span key={skill} className="rounded bg-[#2a1b12] px-2 py-1 text-xs text-[#ff8c42]">
@@ -123,3 +123,4 @@ export default function CollabPage() {
     </div>
   );
 }
+

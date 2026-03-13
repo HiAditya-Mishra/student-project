@@ -102,7 +102,7 @@ export default function MentorshipPage() {
         availability: offerAvailability.trim(),
         bio: offerBio.trim(),
         authorId: user.uid,
-        authorName: user.displayName || "Campus User",
+        authorName: user.displayName || "Spheera User",
         createdAt: serverTimestamp(),
       });
       setOfferName("");
@@ -138,7 +138,7 @@ export default function MentorshipPage() {
         area: requestArea,
         timeline: requestTimeline.trim(),
         authorId: user.uid,
-        authorName: user.displayName || "Campus User",
+        authorName: user.displayName || "Spheera User",
         createdAt: serverTimestamp(),
       });
       setRequestName("");
@@ -192,7 +192,7 @@ export default function MentorshipPage() {
               visibleOffers.map((offer) => (
                 <div key={offer.id} className="rounded-2xl border border-[#2f2f2f] bg-[#141414] p-4">
                   <p className="text-lg font-semibold text-white">{offer.name || "Mentor"}</p>
-                  <p className="text-xs text-gray-500">Offered by {offer.authorName || "Campus User"}</p>
+                  <p className="text-xs text-gray-500">Offered by {offer.authorName || "Spheera User"}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {(offer.areas ?? []).map((area) => (
                       <span key={area} className="rounded-md bg-[#2a1b12] px-2 py-1 text-xs text-[#ff8c42]">
@@ -316,7 +316,7 @@ export default function MentorshipPage() {
             requests.map((request) => (
               <div key={request.id} className="rounded-2xl border border-[#2f2f2f] bg-[#141414] p-4">
                 <p className="text-lg font-semibold text-white">{request.name || "Student"}</p>
-                <p className="text-xs text-gray-500">Requested by {request.authorName || "Campus User"}</p>
+                <p className="text-xs text-gray-500">Requested by {request.authorName || "Spheera User"}</p>
                 <p className="mt-2 text-sm text-gray-300">Area: {request.area || "General"}</p>
                 {request.timeline ? <p className="text-sm text-gray-400">Timeline: {request.timeline}</p> : null}
                 {request.need ? <p className="mt-2 text-sm text-gray-400">{request.need}</p> : null}
@@ -332,3 +332,4 @@ export default function MentorshipPage() {
     </div>
   );
 }
+

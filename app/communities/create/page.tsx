@@ -50,8 +50,8 @@ export default function CreateCommunityPage() {
           const data = docSnapshot.data() as UserDocLite;
           return {
             id: docSnapshot.id,
-            nickname: (data.nickname || "Campus User").trim(),
-            handle: normalizeHandle(data.handle || data.nickname || "campus_user"),
+            nickname: (data.nickname || "Spheera User").trim(),
+            handle: normalizeHandle(data.handle || data.nickname || "spheera_user"),
           };
         });
         setUsers(next);
@@ -330,3 +330,5 @@ export default function CreateCommunityPage() {
     </div>
   );
 }
+
+

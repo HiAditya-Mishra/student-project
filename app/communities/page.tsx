@@ -286,8 +286,8 @@ export default function CommunitiesPage() {
         const data = docSnapshot.data() as UserDocLite;
         next[docSnapshot.id] = {
           id: docSnapshot.id,
-          nickname: (data.nickname || "Campus User").trim(),
-          handle: normalizeHandle(data.handle || data.nickname || "campus_user"),
+          nickname: (data.nickname || "Spheera User").trim(),
+          handle: normalizeHandle(data.handle || data.nickname || "spheera_user"),
         };
       });
       setUsersById(next);
@@ -540,8 +540,8 @@ export default function CommunitiesPage() {
       const profile = usersById[id];
       return {
         id,
-        name: profile?.nickname || "Campus User",
-        handle: profile?.handle || "campus_user",
+        name: profile?.nickname || "Spheera User",
+        handle: profile?.handle || "spheera_user",
         online: onlineIds.has(id),
       };
     });
@@ -805,7 +805,7 @@ export default function CommunitiesPage() {
           .filter(Boolean)
           .slice(0, 10),
         authorId: user.uid,
-        authorName: user.displayName || "Campus User",
+        authorName: user.displayName || "Spheera User",
         answersCount: 0,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -843,7 +843,7 @@ export default function CommunitiesPage() {
         tx.set(answerRef, {
           text: content,
           authorId: user.uid,
-          authorName: user.displayName || "Campus User",
+          authorName: user.displayName || "Spheera User",
           createdAt: serverTimestamp(),
         });
         tx.update(doubtRef, {
@@ -935,7 +935,7 @@ export default function CommunitiesPage() {
           .slice(0, 10),
         options,
         authorId: user.uid,
-        authorName: user.displayName || "Campus User",
+        authorName: user.displayName || "Spheera User",
         createdAt: serverTimestamp(),
       });
       setPollQuestion("");
@@ -1403,7 +1403,7 @@ export default function CommunitiesPage() {
                           <p className="mt-3 text-sm text-gray-300 whitespace-pre-wrap">{doubt.question}</p>
                         ) : null}
 
-                        <p className="mt-3 text-xs text-gray-500">Posted by {doubt.authorName || "Campus User"}</p>
+                        <p className="mt-3 text-xs text-gray-500">Posted by {doubt.authorName || "Spheera User"}</p>
 
                         {isSelected ? (
                           <div className="mt-4 space-y-3 rounded-xl border border-[#262626] bg-[#101010] p-3">
@@ -1418,7 +1418,7 @@ export default function CommunitiesPage() {
                                         : "border-[#262626] bg-[#141414]"
                                     }`}
                                   >
-                                    <p className="text-xs text-[#ff8c42]">{answer.authorName || "Campus User"}</p>
+                                    <p className="text-xs text-[#ff8c42]">{answer.authorName || "Spheera User"}</p>
                                     <p className="mt-1 text-sm text-gray-200 whitespace-pre-wrap">{answer.text || ""}</p>
                                     <div className="mt-2 flex items-center gap-2">
                                       {doubt.acceptedAnswerId === answer.id ? (
@@ -1747,3 +1747,5 @@ export default function CommunitiesPage() {
     </div>
   );
 }
+
+

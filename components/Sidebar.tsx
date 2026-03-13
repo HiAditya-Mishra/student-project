@@ -34,7 +34,7 @@ export default function Sidebar() {
 
   return (
     <div className="h-full p-4 bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 transition-colors duration-300 flex flex-col">
-      <h2 className="text-xl font-bold mb-4 text-indigo-600 dark:text-violet-400">CampusSphere</h2>
+      <h2 className="text-xl font-bold mb-4 text-indigo-600 dark:text-violet-400">Spheera</h2>
 
       <div className="mb-6">
         <p className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mb-2">Navigation</p>
@@ -121,3 +121,4 @@ export default function Sidebar() {
     </div>
   );
 }
+

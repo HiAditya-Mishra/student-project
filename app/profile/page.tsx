@@ -107,7 +107,7 @@ export default function ProfilePage() {
   const avatarPreview = useMemo(() => resolveAvatar(profile, auth.currentUser?.uid), [profile]);
   const bioCharCount = profile.bio.length;
   const seedAvatarPreview = useMemo(
-    () => avatarFromSeed(profile.avatarSeed.trim() || auth.currentUser?.uid || "campus-user"),
+    () => avatarFromSeed(profile.avatarSeed.trim() || auth.currentUser?.uid || "spheera-user"),
     [profile.avatarSeed],
   );
   const hasCustomAvatar = Boolean(profile.avatarUrl.trim());
@@ -436,8 +436,8 @@ export default function ProfilePage() {
         <aside className="space-y-3 rounded-2xl border border-[#2d2d2d] bg-[#141414] p-4">
           <p className="text-xs uppercase tracking-wide text-gray-400">Live Preview</p>
           <img src={avatarPreview} alt={profile.nickname || "Avatar"} className="h-20 w-20 rounded-full border border-[#ff8c42]" />
-          <h3 className="text-xl font-semibold">{profile.nickname || "Campus User"}</h3>
-          <p className="text-xs text-gray-400">@{profile.handle || "campus_user"}</p>
+          <h3 className="text-xl font-semibold">{profile.nickname || "Spheera User"}</h3>
+          <p className="text-xs text-gray-400">@{profile.handle || "spheera_user"}</p>
           <p className="text-xs text-[#5bc0ff]">Level: {profile.levelTitle || "Fresher"} | Sapphire: {profile.sapphires ?? 0}</p>
           <p className="text-sm text-gray-300 whitespace-pre-wrap break-words">{profile.bio || "Your bio will appear here."}</p>
           <div className="flex flex-wrap gap-2">
@@ -551,3 +551,6 @@ export default function ProfilePage() {
     </div>
   );
 }
+
+
+

@@ -1,4 +1,4 @@
-ï»¿"use client";
+"use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Navbar from "@/components/navbar";
@@ -399,7 +399,7 @@ export default function StudyRoomsPage() {
         participants: [user.uid],
         participantMeta: {
           [user.uid]: {
-            name: user.displayName || "Campus User",
+            name: user.displayName || "Spheera User",
             goal: "",
             joinedAt: serverTimestamp(),
           },
@@ -442,7 +442,7 @@ export default function StudyRoomsPage() {
       participants: arrayUnion(user.uid),
       attendanceLog: arrayUnion(`${new Date().toLocaleString()} - ${user.displayName || "User"} joined`),
       [`participantMeta.${user.uid}`]: {
-        name: user.displayName || "Campus User",
+        name: user.displayName || "Spheera User",
         goal: targetRoom?.participantMeta?.[user.uid]?.goal || "",
         joinedAt: serverTimestamp(),
       },
@@ -499,7 +499,7 @@ export default function StudyRoomsPage() {
       await addDoc(collection(db, "studyRooms", selectedRoomId, "messages"), {
         text: messageDraft.trim(),
         senderId: user.uid,
-        senderName: user.displayName || "Campus User",
+        senderName: user.displayName || "Spheera User",
         createdAt: serverTimestamp(),
       });
       setMessageDraft("");
@@ -531,7 +531,7 @@ export default function StudyRoomsPage() {
         description: resourceDescription.trim(),
         kind: "link",
         sharedById: user.uid,
-        sharedByName: user.displayName || "Campus User",
+        sharedByName: user.displayName || "Spheera User",
         createdAt: serverTimestamp(),
       });
       setResourceTitle("");
@@ -657,7 +657,7 @@ export default function StudyRoomsPage() {
       await addDoc(collection(db, "studyRooms", selectedRoomId, "sessionLogs"), {
         text: logDraft.trim(),
         userId: user.uid,
-        userName: user.displayName || "Campus User",
+        userName: user.displayName || "Spheera User",
         cycleId: currentCycleId,
         cycleCount,
         createdAt: serverTimestamp(),
@@ -853,7 +853,7 @@ export default function StudyRoomsPage() {
                         <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Room Pomodoro</p>
                         <p className="mt-2 text-[72px] font-bold leading-none text-[#fff4e6]">{timerLabel}</p>
                         <p className="mt-2 text-sm text-gray-400">
-                          {mode === "focus" ? "Focus cycle" : "Break cycle"} Â· {focusMinutes}-{breakMinutes}
+                          {mode === "focus" ? "Focus cycle" : "Break cycle"} · {focusMinutes}-{breakMinutes}
                         </p>
                       </div>
                       <div className="space-y-2">
@@ -934,7 +934,7 @@ export default function StudyRoomsPage() {
                               <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                                 <div className={`max-w-[80%] rounded-xl px-3 py-2 text-sm ${mine ? "bg-[#9a3412]" : "bg-[#1b2531]"}`}>
                                   {!mine ? (
-                                    <p className="mb-0.5 text-[11px] text-[#fdba74]">{message.senderName || "Campus User"}</p>
+                                    <p className="mb-0.5 text-[11px] text-[#fdba74]">{message.senderName || "Spheera User"}</p>
                                   ) : null}
                                   <p className="whitespace-pre-wrap break-words">{message.text || ""}</p>
                                   <p className="mt-1 text-[10px] text-gray-300">{formatMessageTime(message.createdAt?.seconds)}</p>
@@ -1075,7 +1075,7 @@ export default function StudyRoomsPage() {
                         Object.entries(selectedRoom.participantMeta || {}).map(([uid, meta]) => (
                           <div key={uid} className="rounded-xl border border-[#2c3442] bg-[#0c1218] p-3">
                             <p className="text-sm text-gray-200">
-                              {meta.name || "Member"} Â· {meta.goal || "Set a goal"} Â· {focusElapsedMinutes} min
+                              {meta.name || "Member"} · {meta.goal || "Set a goal"} · {focusElapsedMinutes} min
                             </p>
                             <p className="mt-1 text-[11px] text-gray-500">Presence: focused</p>
                           </div>
@@ -1174,3 +1174,4 @@ export default function StudyRoomsPage() {
     </div>
   );
 }
+

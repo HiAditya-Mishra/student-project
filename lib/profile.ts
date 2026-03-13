@@ -36,7 +36,7 @@ export function normalizeHandle(input: string) {
     .replace(/_+/g, "_")
     .replace(/^[@._-]+|[@._-]+$/g, "");
 
-  return cleaned.slice(0, 30) || "campus_user";
+  return cleaned.slice(0, 30) || "spheera_user";
 }
 
 export function countWords(text: string) {
@@ -44,12 +44,14 @@ export function countWords(text: string) {
 }
 
 export function avatarFromSeed(seed: string) {
-  return `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(seed || "campus-user")}`;
+  return `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(seed || "spheera-user")}`;
 }
 
 export function resolveAvatar(profile?: Pick<UserProfileDoc, "avatarUrl" | "avatarSeed"> | null, fallbackSeed?: string) {
   if (profile?.avatarUrl?.trim()) {
     return profile.avatarUrl.trim();
   }
-  return avatarFromSeed(profile?.avatarSeed?.trim() || fallbackSeed || "campus-user");
+  return avatarFromSeed(profile?.avatarSeed?.trim() || fallbackSeed || "spheera-user");
 }
+
+

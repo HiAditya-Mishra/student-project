@@ -88,8 +88,8 @@ export default function PublicProfilePage() {
             <div className="flex items-start gap-4">
               <img src={avatar} alt={profile.nickname || "User"} className="h-20 w-20 rounded-full border border-[#ff8c42]" />
               <div>
-                <h1 className="text-2xl font-bold text-[#ff8c42]">{profile.nickname || "Campus User"}</h1>
-                <p className="text-sm text-gray-400">@{profile.handle || "campus_user"}</p>
+                <h1 className="text-2xl font-bold text-[#ff8c42]">{profile.nickname || "Spheera User"}</h1>
+                <p className="text-sm text-gray-400">@{profile.handle || "spheera_user"}</p>
                 <p className="text-xs text-[#5bc0ff]">{profile.levelTitle || "Fresher"} | {profile.sapphires ?? 0} Sapphire</p>
               </div>
             </div>
@@ -132,3 +132,5 @@ export default function PublicProfilePage() {
     </div>
   );
 }
+
+

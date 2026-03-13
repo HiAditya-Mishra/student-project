@@ -123,7 +123,7 @@ export default function PostFeed({
           const handle = normalizeHandle(post.authorHandle || post.author || "");
           const author: AuthorLite = {
             id: post.authorId,
-            nickname: (post.author || "Campus User").trim(),
+            nickname: (post.author || "Spheera User").trim(),
             handle,
             avatarUrl: post.authorAvatarUrl,
           };
@@ -266,7 +266,7 @@ export default function PostFeed({
               const handle = normalizeHandle(comment.authorHandle || comment.author || "");
               next[comment.authorId] = {
                 id: comment.authorId,
-                nickname: (comment.author || "Campus User").trim(),
+                nickname: (comment.author || "Spheera User").trim(),
                 handle,
                 avatarUrl: comment.authorAvatarUrl,
               };
@@ -280,7 +280,7 @@ export default function PostFeed({
               const handle = normalizeHandle(comment.authorHandle || comment.author || "");
               next[handle] = {
                 id: comment.authorId,
-                nickname: (comment.author || "Campus User").trim(),
+                nickname: (comment.author || "Spheera User").trim(),
                 handle,
                 avatarUrl: comment.authorAvatarUrl,
               };
@@ -457,8 +457,8 @@ export default function PostFeed({
     try {
       if (navigator.share) {
         await navigator.share({
-          title: "CampusSphere post",
-          text: "Check this post on CampusSphere",
+          title: "Spheera post",
+          text: "Check this post on Spheera",
           url,
         });
         return;
@@ -842,3 +842,5 @@ export default function PostFeed({
     </div>
   );
 }
+
+

@@ -66,7 +66,7 @@ export default function FeedPage() {
             setPublicMode(data.publicProfile ?? true);
           } else {
             setProfile({
-              nickname: user.displayName || "Campus User",
+              nickname: user.displayName || "Spheera User",
               skills: [],
               avatarSeed: user.uid,
               publicProfile: true,
@@ -118,7 +118,7 @@ export default function FeedPage() {
 
           nextAuthors.push({
             id,
-            nickname: (data.author || "Campus User").trim(),
+            nickname: (data.author || "Spheera User").trim(),
             handle: normalizeHandle(data.authorHandle || data.author || ""),
             avatarUrl: data.authorAvatarUrl,
           });
@@ -160,7 +160,7 @@ export default function FeedPage() {
   }, []);
 
   const displayName = useMemo(() => {
-    return profile?.nickname || auth.currentUser?.displayName || "Campus User";
+    return profile?.nickname || auth.currentUser?.displayName || "Spheera User";
   }, [profile?.nickname]);
 
   const topSkills = (profile?.skills ?? []).slice(0, 4);
@@ -328,7 +328,7 @@ export default function FeedPage() {
                         className="h-10 w-10 rounded-full border border-[#ff8c42]"
                       />
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-white">{matched.nickname || "Campus User"}</p>
+                        <p className="truncate text-sm font-semibold text-white">{matched.nickname || "Spheera User"}</p>
                         <p className="truncate text-xs text-gray-400">@{normalizeHandle(matched.handle || matched.nickname || "")}</p>
                       </div>
                     </button>
@@ -394,13 +394,13 @@ export default function FeedPage() {
 
           <div className="rounded-2xl border border-[#2f2f2f] bg-[#141414] p-4">
             <img
-              src={resolveAvatar(profile, auth.currentUser?.uid || "campus-user")}
+              src={resolveAvatar(profile, auth.currentUser?.uid || "spheera-user")}
               alt={displayName}
               className="mx-auto h-16 w-16 rounded-full border border-[#ff8c42] bg-[#1f1f1f]"
             />
             <h3 className="mt-3 text-center text-lg font-semibold">{displayName}</h3>
             <p className="text-center text-xs text-gray-400">
-              @{normalizeHandle(profile?.handle || displayName || "campus_user")}
+              @{normalizeHandle(profile?.handle || displayName || "spheera_user")}
             </p>
 
             <div className="mt-4 space-y-2 text-sm">
@@ -459,3 +459,6 @@ export default function FeedPage() {
     </div>
   );
 }
+
+
+

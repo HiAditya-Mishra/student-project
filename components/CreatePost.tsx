@@ -52,7 +52,7 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
             skills?: string[];
             interests?: string;
           };
-          const nickname = (data.nickname || "Campus User").trim();
+          const nickname = (data.nickname || "Spheera User").trim();
           const handle = normalizeHandle(data.handle || nickname);
           const avatar = resolveAvatar(data, docSnapshot.id);
           return {
@@ -482,3 +482,4 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
     </div>
   );
 }
+

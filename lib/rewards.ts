@@ -12,7 +12,7 @@ export const LEVELS: Array<{ level: number; title: string; minSapphires: number 
   { level: 3, title: "Scholar", minSapphires: 800 },
   { level: 4, title: "Mentor", minSapphires: 2000 },
   { level: 5, title: "Luminary", minSapphires: 5000 },
-  { level: 6, title: "Campus Legend", minSapphires: 15000 },
+  { level: 6, title: "Spheera Legend", minSapphires: 15000 },
 ];
 
 type UserRewardState = {
