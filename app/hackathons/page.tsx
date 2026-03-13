@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useMemo, useState, useEffect } from "react";
 import Navbar from "@/components/navbar";
@@ -163,7 +163,7 @@ export default function HackathonTeamFinderPage() {
                     <div>
                       <p className="text-lg font-semibold text-white">{listing.title || "Looking for teammates"}</p>
                       <p className="text-sm text-gray-300">
-                        {listing.eventName || "Unknown event"} � {listing.type || "Hackathon"}
+                        {listing.eventName || "Unknown event"} · {listing.type || "Hackathon"}
                       </p>
                     </div>
                     <span className="rounded-full border border-[#2f2f2f] bg-[#101010] px-3 py-1 text-[11px] text-gray-300">
