@@ -139,6 +139,11 @@ service cloud.firestore {
       }
     }
 
+    // Allow collectionGroup reads for doubts across communities.
+    match /{document=**}/doubts/{doubtId} {
+      allow read: if signedIn();
+    }
+
     match /posts/{postId} {
       allow read: if signedIn();
       allow create: if signedIn()

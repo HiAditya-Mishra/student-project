@@ -31,6 +31,8 @@ function generateInviteCode() {
 
 export default function CreateCommunityPage() {
   const router = useRouter();
+  const summaryLimit = 1000;
+  const rulesLimit = 6;
   const [name, setName] = useState("");
   const [summary, setSummary] = useState("");
   const [visibility, setVisibility] = useState<CommunityVisibility>("public");
@@ -107,12 +109,20 @@ export default function CreateCommunityPage() {
       setError("Community name and summary are required.");
       return;
     }
+    if (summary.trim().length > summaryLimit) {
+      setError(`Summary must be ${summaryLimit} characters or less.`);
+      return;
+    }
 
     const parsedRules = rulesText
       .split("\n")
       .map((rule) => rule.trim())
       .filter(Boolean)
-      .slice(0, 20);
+      .slice(0, rulesLimit + 1);
+    if (parsedRules.length > rulesLimit) {
+      setError(`Limit community rules to ${rulesLimit}, one per line.`);
+      return;
+    }
     if (!parsedRules.length) {
       setError("Add at least one community rule.");
       return;
@@ -241,24 +251,40 @@ export default function CreateCommunityPage() {
           ) : null}
 
           <label className="space-y-1 block">
-            <span className="text-xs text-gray-400">Summary</span>
+            <span className="text-xs text-gray-400">Summary (max {summaryLimit} characters)</span>
             <textarea
               value={summary}
               onChange={(event) => setSummary(event.target.value)}
               rows={3}
               placeholder="What is this community about?"
+              maxLength={summaryLimit}
               className="w-full rounded-lg border border-[#303030] bg-[#101010] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
             />
+            <span className="text-[11px] text-gray-500">{summary.length}/{summaryLimit}</span>
           </label>
 
           <label className="space-y-1 block">
-            <span className="text-xs text-gray-400">Community Rules (one per line)</span>
+            <span className="text-xs text-gray-400">Community Rules (max {rulesLimit}, one per line)</span>
             <textarea
               value={rulesText}
-              onChange={(event) => setRulesText(event.target.value)}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                const ruleCount = nextValue
+                  .split("\n")
+                  .map((rule) => rule.trim())
+                  .filter(Boolean).length;
+                if (ruleCount > rulesLimit) return;
+                setRulesText(nextValue);
+              }}
               rows={5}
               className="w-full rounded-lg border border-[#303030] bg-[#101010] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
             />
+            <span className="text-[11px] text-gray-500">
+              {rulesText
+                .split("\n")
+                .map((rule) => rule.trim())
+                .filter(Boolean).length}/{rulesLimit} rules
+            </span>
           </label>
 
           <div className="rounded-xl border border-[#2a2a2a] bg-[#101010] p-3">

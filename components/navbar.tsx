@@ -10,6 +10,7 @@ import { resolveAvatar } from "@/lib/profile";
 const links = [
   { label: "Feed", href: "/feed" },
   { label: "Communities", href: "/communities" },
+  { label: "Doubts", href: "/doubts" },
   { label: "Study Rooms", href: "/study-rooms" },
   { label: "Messages", href: "/messages" },
   { label: "Collab", href: "/collab" },
