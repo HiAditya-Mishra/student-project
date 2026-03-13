@@ -1,4 +1,4 @@
-"use client";
+ï»¿"use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Navbar from "@/components/navbar";
@@ -853,7 +853,7 @@ export default function StudyRoomsPage() {
                         <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Room Pomodoro</p>
                         <p className="mt-2 text-[72px] font-bold leading-none text-[#fff4e6]">{timerLabel}</p>
                         <p className="mt-2 text-sm text-gray-400">
-                          {mode === "focus" ? "Focus cycle" : "Break cycle"} · {focusMinutes}-{breakMinutes}
+                          {mode === "focus" ? "Focus cycle" : "Break cycle"} Â· {focusMinutes}-{breakMinutes}
                         </p>
                       </div>
                       <div className="space-y-2">
@@ -1075,7 +1075,7 @@ export default function StudyRoomsPage() {
                         Object.entries(selectedRoom.participantMeta || {}).map(([uid, meta]) => (
                           <div key={uid} className="rounded-xl border border-[#2c3442] bg-[#0c1218] p-3">
                             <p className="text-sm text-gray-200">
-                              {meta.name || "Member"} · {meta.goal || "Set a goal"} · {focusElapsedMinutes} min
+                              {meta.name || "Member"} Â· {meta.goal || "Set a goal"} Â· {focusElapsedMinutes} min
                             </p>
                             <p className="mt-1 text-[11px] text-gray-500">Presence: focused</p>
                           </div>
