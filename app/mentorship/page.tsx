@@ -45,7 +45,7 @@ export default function MentorshipPage() {
   const [offerBio, setOfferBio] = useState("");
   const [requestName, setRequestName] = useState("");
   const [requestNeed, setRequestNeed] = useState("");
-  const [requestArea, setRequestArea] = useState(AREAS[0]);
+  const [requestArea, setRequestArea] = useState<(typeof AREAS)[number]>(AREAS[0]);
   const [requestTimeline, setRequestTimeline] = useState("");
   const [postingOffer, setPostingOffer] = useState(false);
   const [postingRequest, setPostingRequest] = useState(false);
@@ -277,7 +277,7 @@ export default function MentorshipPage() {
                 />
                 <select
                   value={requestArea}
-                  onChange={(event) => setRequestArea(event.target.value)}
+                  onChange={(event) => setRequestArea(event.target.value as (typeof AREAS)[number])}
                   className="w-full rounded border border-[#303030] bg-[#111111] px-3 py-2 text-sm"
                 >
                   {AREAS.map((area) => (
