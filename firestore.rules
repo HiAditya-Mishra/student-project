@@ -84,6 +84,59 @@ service cloud.firestore {
         )
       );
       allow delete: if isCommunityAdminFromResource();
+
+      match /doubts/{doubtId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.authorId == request.auth.uid;
+        allow update: if signedIn() && (
+          resource.data.authorId == request.auth.uid
+          || (
+            request.resource.data.diff(resource.data).changedKeys().hasOnly([
+              "answersCount",
+              "lastAnsweredAt",
+              "updatedAt",
+              "acceptedAnswerId",
+              "solvedAt",
+              "solvedBy"
+            ])
+            && request.resource.data.answersCount >= resource.data.answersCount
+          )
+        );
+        allow delete: if signedIn()
+          && resource.data.authorId == request.auth.uid;
+
+        match /answers/{answerId} {
+          allow read: if signedIn();
+          allow create: if signedIn()
+            && request.resource.data.authorId == request.auth.uid;
+          allow update: if signedIn()
+            && resource.data.authorId == request.auth.uid;
+          allow delete: if signedIn()
+            && resource.data.authorId == request.auth.uid;
+        }
+
+      }
+
+      match /polls/{pollId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.authorId == request.auth.uid;
+        allow update: if signedIn()
+          && resource.data.authorId == request.auth.uid;
+        allow delete: if signedIn()
+          && resource.data.authorId == request.auth.uid;
+
+        match /responses/{responseId} {
+          allow read: if signedIn();
+          allow create: if signedIn()
+            && request.resource.data.userId == request.auth.uid;
+          allow update: if signedIn()
+            && resource.data.userId == request.auth.uid;
+          allow delete: if signedIn()
+            && resource.data.userId == request.auth.uid;
+        }
+      }
     }
 
     match /posts/{postId} {
@@ -135,6 +188,53 @@ service cloud.firestore {
         && request.resource.data.roomId == resource.data.roomId;
       allow delete: if signedIn()
         && resource.data.senderId == request.auth.uid;
+    }
+
+    match /mentorshipOffers/{offerId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.authorId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.authorId == request.auth.uid;
+      allow delete: if signedIn()
+        && resource.data.authorId == request.auth.uid;
+    }
+
+    match /mentorshipRequests/{requestId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.authorId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.authorId == request.auth.uid;
+      allow delete: if signedIn()
+        && resource.data.authorId == request.auth.uid;
+    }
+
+    match /users/{uid}/notifications/{notificationId} {
+      allow read: if isSelf(uid);
+      allow create: if isSelf(uid);
+      allow update: if isSelf(uid);
+      allow delete: if isSelf(uid);
+    }
+
+    match /collabListings/{listingId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.authorId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.authorId == request.auth.uid;
+      allow delete: if signedIn()
+        && resource.data.authorId == request.auth.uid;
+    }
+
+    match /teamFinderListings/{listingId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.authorId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.authorId == request.auth.uid;
+      allow delete: if signedIn()
+        && resource.data.authorId == request.auth.uid;
     }
 
     match /studyRooms/{roomId} {

@@ -13,6 +13,9 @@ const links = [
   { label: "Study Rooms", href: "/study-rooms" },
   { label: "Messages", href: "/messages" },
   { label: "Collab", href: "/collab" },
+  { label: "Team Finder", href: "/hackathons" },
+  { label: "Mentorship", href: "/mentorship" },
+  { label: "Notifications", href: "/notifications" },
   { label: "Profile", href: "/profile" },
 ];
 

@@ -312,6 +312,10 @@ export async function rewardHelpfulComment(authorId: string) {
   return applySapphireDelta(authorId, 15, false);
 }
 
+export async function rewardDoubtAnswer(userId: string) {
+  return applySapphireDelta(userId, 8, true);
+}
+
 export async function rewardStudyPomodoroComplete(userId: string) {
   const userRef = doc(db, "users", userId);
   return runTransaction(db, async (tx) => {
