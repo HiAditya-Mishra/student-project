@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import Navbar from "@/components/navbar";
 import { auth, db } from "@/lib/firebase";
 import { normalizeHandle } from "@/lib/profile";
-import { arrayUnion, collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc, writeBatch } from "firebase/firestore";
+import { arrayUnion, collection, doc, getDoc, getDocs, serverTimestamp, setDoc, writeBatch } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 
 type CommunityVisibility = "public" | "private" | "invite";
@@ -45,9 +45,9 @@ export default function CreateCommunityPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, "users"),
-      (snapshot) => {
+    const loadUsers = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, "users"));
         const next: UserCandidate[] = snapshot.docs.map((docSnapshot) => {
           const data = docSnapshot.data() as UserDocLite;
           return {
@@ -57,11 +57,12 @@ export default function CreateCommunityPage() {
           };
         });
         setUsers(next);
-      },
-      () => setUsers([]),
-    );
+      } catch {
+        setUsers([]);
+      }
+    };
 
-    return () => unsubscribe();
+    void loadUsers();
   }, []);
 
   const filteredUsers = useMemo(() => {

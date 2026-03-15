@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Navbar from "@/components/navbar";
 import { auth, db } from "@/lib/firebase";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
 type NotificationItem = {
@@ -39,10 +39,9 @@ export default function NotificationsPage() {
       return;
     }
 
-    const q = query(collection(db, "users", uid, "notifications"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
+    const loadNotifications = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, "users", uid, "notifications"), orderBy("createdAt", "desc")));
         setError(null);
         setItems(
           snapshot.docs.map((docSnapshot) => ({
@@ -50,15 +49,14 @@ export default function NotificationsPage() {
             ...(docSnapshot.data() as Omit<NotificationItem, "id">),
           })),
         );
-      },
-      (snapshotError) => {
+      } catch (snapshotError) {
         console.error(snapshotError);
         setError("Notifications are blocked by Firestore rules.");
         setItems([]);
-      },
-    );
+      }
+    };
 
-    return () => unsubscribe();
+    void loadNotifications();
   }, [uid]);
 
   const grouped = useMemo(() => {

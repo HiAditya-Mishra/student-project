@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { User, onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { resolveAvatar } from "@/lib/profile";
 
@@ -28,28 +28,28 @@ export default function Navbar() {
   const [avatarUrl, setAvatarUrl] = useState("");
 
   useEffect(() => {
-    let profileUnsub: (() => void) | null = null;
-
     const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
       setUser(nextUser);
-      if (profileUnsub) {
-        profileUnsub();
-        profileUnsub = null;
-      }
-
       if (!nextUser) {
         setAvatarUrl("");
         return;
       }
 
-      profileUnsub = onSnapshot(doc(db, "users", nextUser.uid), (snapshot) => {
-        const data = snapshot.exists() ? snapshot.data() as { avatarUrl?: string; avatarSeed?: string } : {};
-        setAvatarUrl(resolveAvatar(data, nextUser.uid));
-      });
+      const loadAvatar = async () => {
+        try {
+          const snapshot = await getDoc(doc(db, "users", nextUser.uid));
+          const data = snapshot.exists() ? snapshot.data() as { avatarUrl?: string; avatarSeed?: string } : {};
+          setAvatarUrl(resolveAvatar(data, nextUser.uid));
+        } catch (error) {
+          console.error(error);
+          setAvatarUrl(resolveAvatar(undefined, nextUser.uid));
+        }
+      };
+
+      void loadAvatar();
     });
 
     return () => {
-      if (profileUnsub) profileUnsub();
       unsubscribe();
     };
   }, []);

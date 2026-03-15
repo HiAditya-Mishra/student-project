@@ -9,6 +9,29 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == uid;
     }
 
+    function userDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid));
+    }
+
+    function isPublicProfile(uid) {
+      return userDoc(uid).data.publicProfile != false;
+    }
+
+    function isFollowing(a, b) {
+      return userDoc(a).data.followingUsers is list
+        && userDoc(a).data.followingUsers.hasAny([b]);
+    }
+
+    function isMutualFollow(a, b) {
+      return isFollowing(a, b) && isFollowing(b, a);
+    }
+
+    function sharesCommunity(a, b) {
+      return userDoc(a).data.followingCommunities is list
+        && userDoc(b).data.followingCommunities is list
+        && userDoc(a).data.followingCommunities.hasAny(userDoc(b).data.followingCommunities);
+    }
+
     function communityDoc(communityId) {
       return get(/databases/$(database)/documents/communities/$(communityId));
     }
@@ -193,6 +216,102 @@ service cloud.firestore {
         && request.resource.data.roomId == resource.data.roomId;
       allow delete: if signedIn()
         && resource.data.senderId == request.auth.uid;
+    }
+
+    match /dmThreads/{threadId} {
+      allow read: if signedIn()
+        && isPublicProfile(request.auth.uid)
+        && resource.data.participantIds.hasAny([request.auth.uid]);
+
+      allow create: if signedIn()
+        && isPublicProfile(request.auth.uid)
+        && request.resource.data.participantIds.size() == 2
+        && request.resource.data.participantIds.hasAny([request.auth.uid])
+        && request.resource.data.requesterId == request.auth.uid
+        && request.resource.data.participantIds.hasAny([request.resource.data.recipientId])
+        && request.resource.data.participantIds.hasAny([request.resource.data.requesterId])
+        && isPublicProfile(request.resource.data.recipientId)
+        && (
+          (
+            request.resource.data.status == "active"
+            && isMutualFollow(request.resource.data.requesterId, request.resource.data.recipientId)
+          )
+          || (
+            request.resource.data.status == "request"
+            && sharesCommunity(request.resource.data.requesterId, request.resource.data.recipientId)
+          )
+          || (
+            request.resource.data.status == "active"
+            && request.resource.data.origin == "collab"
+            && request.resource.data.collabListingId is string
+            && get(/databases/$(database)/documents/collabListings/$(request.resource.data.collabListingId)).exists()
+            && get(/databases/$(database)/documents/collabListings/$(request.resource.data.collabListingId)).data.authorId
+              == request.resource.data.recipientId
+          )
+        );
+
+      allow update: if signedIn()
+        && isPublicProfile(request.auth.uid)
+        && resource.data.participantIds.hasAny([request.auth.uid])
+        && request.resource.data.participantIds == resource.data.participantIds
+        && request.resource.data.requesterId == resource.data.requesterId
+        && request.resource.data.recipientId == resource.data.recipientId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(["status", "updatedAt", "lastMessage", "origin", "collabListingId"])
+        && (
+          (
+            resource.data.status == "request"
+            && request.resource.data.status == "active"
+            && (
+              request.auth.uid == resource.data.recipientId
+              || (
+                request.resource.data.origin == "collab"
+                && request.resource.data.collabListingId is string
+                && get(/databases/$(database)/documents/collabListings/$(request.resource.data.collabListingId)).exists()
+                && get(/databases/$(database)/documents/collabListings/$(request.resource.data.collabListingId)).data.authorId
+                  == resource.data.recipientId
+                && request.auth.uid == resource.data.requesterId
+              )
+            )
+          )
+          || (
+            resource.data.status == request.resource.data.status
+            && request.resource.data.origin == resource.data.origin
+            && request.resource.data.collabListingId == resource.data.collabListingId
+          )
+        );
+
+      allow delete: if signedIn()
+        && isPublicProfile(request.auth.uid)
+        && resource.data.participantIds.hasAny([request.auth.uid]);
+
+      match /messages/{messageId} {
+        allow read: if signedIn()
+          && isPublicProfile(request.auth.uid)
+          && get(/databases/$(database)/documents/dmThreads/$(threadId)).data.participantIds.hasAny([request.auth.uid]);
+
+        allow create: if signedIn()
+          && isPublicProfile(request.auth.uid)
+          && request.resource.data.senderId == request.auth.uid
+          && get(/databases/$(database)/documents/dmThreads/$(threadId)).data.participantIds.hasAny([request.auth.uid])
+          && (
+            get(/databases/$(database)/documents/dmThreads/$(threadId)).data.status == "active"
+            || (
+              get(/databases/$(database)/documents/dmThreads/$(threadId)).data.status == "request"
+              && get(/databases/$(database)/documents/dmThreads/$(threadId)).data.requesterId == request.auth.uid
+            )
+          )
+          && isPublicProfile(get(/databases/$(database)/documents/dmThreads/$(threadId)).data.participantIds[0])
+          && isPublicProfile(get(/databases/$(database)/documents/dmThreads/$(threadId)).data.participantIds[1]);
+
+        allow update: if signedIn()
+          && isPublicProfile(request.auth.uid)
+          && resource.data.senderId == request.auth.uid;
+
+        allow delete: if signedIn()
+          && isPublicProfile(request.auth.uid)
+          && resource.data.senderId == request.auth.uid;
+      }
     }
 
     match /mentorshipOffers/{offerId} {

@@ -5,7 +5,7 @@ import Navbar from "@/components/navbar";
 import CreatePost from "@/components/CreatePost";
 import PostFeed from "@/components/PostFeed";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc } from "firebase/firestore";
 import { usePathname, useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import { normalizeHandle, resolveAvatar, UserProfileDoc } from "@/lib/profile";
@@ -40,25 +40,17 @@ export default function FeedPage() {
   const [usingInsurance, setUsingInsurance] = useState(false);
 
   useEffect(() => {
-    let profileUnsubscribe: (() => void) | null = null;
-
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
-        if (profileUnsubscribe) {
-          profileUnsubscribe();
-          profileUnsubscribe = null;
-        }
         setProfile(null);
         setAuthLoading(false);
         return;
       }
       void rewardLoginStreak(user.uid);
 
-      const profileRef = doc(db, "users", user.uid);
-      if (profileUnsubscribe) profileUnsubscribe();
-      profileUnsubscribe = onSnapshot(
-        profileRef,
-        (snapshot) => {
+      const loadProfile = async () => {
+        try {
+          const snapshot = await getDoc(doc(db, "users", user.uid));
           setProfileError(null);
           if (snapshot.exists()) {
             const data = snapshot.data() as UserProfile;
@@ -73,22 +65,22 @@ export default function FeedPage() {
             });
             setPublicMode(true);
           }
-          setAuthLoading(false);
-        },
-        (error) => {
+        } catch (error) {
           console.error(error);
           setProfileError(
-            error.code === "permission-denied"
+            typeof error === "object" && error && "code" in error && error.code === "permission-denied"
               ? "Profile access is blocked by Firestore rules."
               : "Could not load profile settings.",
           );
+        } finally {
           setAuthLoading(false);
-        },
-      );
+        }
+      };
+
+      void loadProfile();
     });
 
     return () => {
-      if (profileUnsubscribe) profileUnsubscribe();
       unsubscribe();
     };
   }, []);
@@ -100,9 +92,9 @@ export default function FeedPage() {
   }, [pathname]);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, "posts"),
-      (snapshot) => {
+    const loadAuthors = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(200)));
         const seen = new Set<string>();
         const nextAuthors: AuthorSearchItem[] = [];
         snapshot.docs.forEach((docSnapshot) => {
@@ -124,14 +116,13 @@ export default function FeedPage() {
           });
         });
         setSearchAuthors(nextAuthors);
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
         setSearchAuthors([]);
-      },
-    );
+      }
+    };
 
-    return () => unsubscribe();
+    void loadAuthors();
   }, []);
 
   useEffect(() => {

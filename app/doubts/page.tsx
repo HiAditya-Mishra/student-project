@@ -8,8 +8,9 @@ import {
   collection,
   collectionGroup,
   doc,
+  getDoc,
+  getDocs,
   increment,
-  onSnapshot,
   orderBy,
   query,
   runTransaction,
@@ -78,19 +79,15 @@ export default function DoubtsPage() {
   const [doubtTagFilter, setDoubtTagFilter] = useState("");
 
   useEffect(() => {
-    let profileUnsub: (() => void) | null = null;
     const authUnsub = onAuthStateChanged(auth, (user) => {
-      if (profileUnsub) {
-        profileUnsub();
-        profileUnsub = null;
-      }
       if (!user) {
         setCurrentUserId("");
         setJoined({});
         return;
       }
       setCurrentUserId(user.uid);
-      profileUnsub = onSnapshot(doc(db, "users", user.uid), (snapshot) => {
+      const loadProfile = async () => {
+        const snapshot = await getDoc(doc(db, "users", user.uid));
         const data = (snapshot.exists() ? snapshot.data() : {}) as UserDocLite;
         const following = data.followingCommunities ?? [];
         const next: Record<string, boolean> = {};
@@ -98,38 +95,36 @@ export default function DoubtsPage() {
           next[communityId] = true;
         });
         setJoined(next);
-      });
+      };
+      void loadProfile();
     });
 
     return () => {
-      if (profileUnsub) profileUnsub();
       authUnsub();
     };
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, "communities"),
-      (snapshot) => {
+    const loadCommunities = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, "communities"));
         const next = snapshot.docs.map((docSnapshot) => ({
           id: docSnapshot.id,
           ...(docSnapshot.data() as Omit<Community, "id">),
         }));
         setCommunities(next);
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
         setCommunities([]);
-      },
-    );
-    return () => unsubscribe();
+      }
+    };
+    void loadCommunities();
   }, []);
 
   useEffect(() => {
-    const doubtsQuery = query(collectionGroup(db, "doubts"));
-    const unsubscribe = onSnapshot(
-      doubtsQuery,
-      (snapshot) => {
+    const loadDoubts = async () => {
+      try {
+        const snapshot = await getDocs(query(collectionGroup(db, "doubts")));
         setDoubtsError(null);
         const next = snapshot.docs.map((docSnapshot) => {
           const data = docSnapshot.data() as Omit<Doubt, "id">;
@@ -141,19 +136,18 @@ export default function DoubtsPage() {
           };
         });
         setDoubts(next);
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
         setDoubtsError(
-          error.code === "permission-denied"
+          typeof error === "object" && error && "code" in error && error.code === "permission-denied"
             ? "Doubts are blocked by Firestore rules."
             : "Failed to load doubts.",
         );
         setDoubts([]);
-      },
-    );
+      }
+    };
 
-    return () => unsubscribe();
+    void loadDoubts();
   }, []);
 
   useEffect(() => {
@@ -162,27 +156,26 @@ export default function DoubtsPage() {
       return;
     }
 
-    const answersRef = query(
-      collection(db, "communities", selectedDoubtCommunityId, "doubts", selectedDoubtId, "answers"),
-      orderBy("createdAt", "asc"),
-    );
-    const unsubscribe = onSnapshot(
-      answersRef,
-      (snapshot) => {
+    const loadAnswers = async () => {
+      try {
+        const answersRef = query(
+          collection(db, "communities", selectedDoubtCommunityId, "doubts", selectedDoubtId, "answers"),
+          orderBy("createdAt", "asc"),
+        );
+        const snapshot = await getDocs(answersRef);
         setDoubtAnswers(
           snapshot.docs.map((docSnapshot) => ({
             id: docSnapshot.id,
             ...(docSnapshot.data() as Omit<DoubtAnswer, "id">),
           })),
         );
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
         setDoubtAnswers([]);
-      },
-    );
+      }
+    };
 
-    return () => unsubscribe();
+    void loadAnswers();
   }, [selectedDoubtCommunityId, selectedDoubtId]);
 
   useEffect(() => {

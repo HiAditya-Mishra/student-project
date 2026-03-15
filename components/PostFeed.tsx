@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -9,11 +9,14 @@ import {
   deleteDoc,
   doc,
   getDoc,
-  onSnapshot,
+  getDocs,
+  limit,
   orderBy,
   query,
+  QueryDocumentSnapshot,
   runTransaction,
   serverTimestamp,
+  startAfter,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { normalizeHandle, resolveAvatar } from "@/lib/profile";
@@ -102,21 +105,39 @@ export default function PostFeed({
   const [updatingCommentId, setUpdatingCommentId] = useState<string | null>(null);
   const [markingHelpfulCommentId, setMarkingHelpfulCommentId] = useState<string | null>(null);
   const [userSignalsById, setUserSignalsById] = useState<Record<string, UserSignal>>({});
-  const commentListeners = useRef<Record<string, () => void>>({});
   const commentInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const lastPostDoc = useRef<QueryDocumentSnapshot | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
 
-  useEffect(() => {
-    const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
+  const PAGE_SIZE = 10;
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
+  const loadPosts = useCallback(
+    async (options?: { reset?: boolean }) => {
+      if (loadingMore) return;
+      if (!hasMore && !options?.reset) return;
+
+      setLoadingMore(true);
+      try {
         setFeedError(null);
+        if (options?.reset) {
+          lastPostDoc.current = null;
+          setHasMore(true);
+        }
+
+        const baseQuery = query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(PAGE_SIZE));
+        const pagedQuery = lastPostDoc.current && !options?.reset
+          ? query(collection(db, "posts"), orderBy("createdAt", "desc"), startAfter(lastPostDoc.current), limit(PAGE_SIZE))
+          : baseQuery;
+
+        const snapshot = await getDocs(pagedQuery);
         const fetchedPosts: Post[] = snapshot.docs.map((docSnapshot) => ({
           id: docSnapshot.id,
           ...(docSnapshot.data() as Omit<Post, "id">),
         }));
-        setPosts(fetchedPosts);
+
+        setPosts((prev) => (options?.reset ? fetchedPosts : [...prev, ...fetchedPosts]));
 
         const nextAuthorsById: Record<string, AuthorLite> = {};
         const nextAuthorsByHandle: Record<string, AuthorLite> = {};
@@ -132,35 +153,50 @@ export default function PostFeed({
           nextAuthorsById[author.id] = author;
           nextAuthorsByHandle[author.handle] = author;
         });
-        setAuthorsById(nextAuthorsById);
-        setAuthorsByHandle(nextAuthorsByHandle);
-      },
-      (error) => {
-        console.error(error);
-        if (error.code === "permission-denied") {
-          setFeedError("Firestore denied read access to posts. Update your Firestore Rules.");
-          return;
+        if (Object.keys(nextAuthorsById).length) {
+          setAuthorsById((prev) => ({ ...prev, ...nextAuthorsById }));
+          setAuthorsByHandle((prev) => ({ ...prev, ...nextAuthorsByHandle }));
         }
-        setFeedError("Failed to load posts.");
+
+        lastPostDoc.current = snapshot.docs[snapshot.docs.length - 1] ?? lastPostDoc.current;
+        setHasMore(snapshot.docs.length === PAGE_SIZE);
+      } catch (error) {
+        console.error(error);
+        if (typeof error === "object" && error && "code" in error && error.code === "permission-denied") {
+          setFeedError("Firestore denied read access to posts. Update your Firestore Rules.");
+        } else {
+          setFeedError("Failed to load posts.");
+        }
+      } finally {
+        setLoadingMore(false);
+      }
+    },
+    [hasMore, loadingMore],
+  );
+
+  useEffect(() => {
+    void loadPosts({ reset: true });
+  }, [loadPosts]);
+
+  useEffect(() => {
+    const node = loadMoreRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          void loadPosts();
+        }
       },
+      { rootMargin: "240px" },
     );
-
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [loadPosts]);
 
   useEffect(() => {
-    return () => {
-      Object.values(commentListeners.current).forEach((unsubscribe) => unsubscribe());
-      commentListeners.current = {};
-    };
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, "users"),
-      (snapshot) => {
+    const loadSignals = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, "users"), limit(500)));
         const next: Record<string, UserSignal> = {};
         snapshot.docs.forEach((docSnapshot) => {
           const data = docSnapshot.data() as {
@@ -175,14 +211,12 @@ export default function PostFeed({
           };
         });
         setUserSignalsById(next);
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
         setUserSignalsById({});
-      },
-    );
-
-    return () => unsubscribe();
+      }
+    };
+    void loadSignals();
   }, []);
 
   const handleUpvote = async (postId: string) => {
@@ -240,20 +274,12 @@ export default function PostFeed({
     const nextOpen = !openComments[postId];
     setOpenComments((prev) => ({ ...prev, [postId]: nextOpen }));
 
-    if (!nextOpen) {
-      if (commentListeners.current[postId]) {
-        commentListeners.current[postId]();
-        delete commentListeners.current[postId];
-      }
-      return;
-    }
+    if (!nextOpen) return;
 
-    if (commentListeners.current[postId]) return;
-
-    const commentsQuery = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "asc"));
-    const unsubscribe = onSnapshot(
-      commentsQuery,
-      (snapshot) => {
+    const loadComments = async () => {
+      try {
+        const commentsQuery = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "asc"));
+        const snapshot = await getDocs(commentsQuery);
         const comments: Comment[] = snapshot.docs.map((commentSnapshot) => ({
           id: commentSnapshot.id,
           ...(commentSnapshot.data() as Omit<Comment, "id">),
@@ -290,14 +316,13 @@ export default function PostFeed({
             return next;
           });
         }
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
         alert("Failed to load comments.");
-      },
-    );
+      }
+    };
 
-    commentListeners.current[postId] = unsubscribe;
+    void loadComments();
   };
 
   const submitComment = async (postId: string) => {
@@ -629,7 +654,7 @@ export default function PostFeed({
         const contentText = post.content || "";
         const isLong = contentText.length > 260;
         const isExpanded = expandedPosts[post.id];
-        const visibleContent = isLong && !isExpanded ? `${contentText.slice(0, 240).trimEnd()}…` : contentText;
+        const visibleContent = isLong && !isExpanded ? `${contentText.slice(0, 240).trimEnd()}...` : contentText;
         const createdAtLabel = formatDateTime(post.createdAt?.seconds);
 
         return (
@@ -862,6 +887,12 @@ export default function PostFeed({
         );
       })}
       </div>
+      <div ref={loadMoreRef} />
+      {loadingMore ? (
+        <p className="rounded-xl border border-[#2b2b2b] bg-[#121212] p-3 text-sm text-gray-400">
+          Loading more posts...
+        </p>
+      ) : null}
       {!feedError && !visiblePosts.length ? (
         <p className="rounded-xl border border-[#2b2b2b] bg-[#121212] p-3 text-sm text-gray-400">
           No posts found for "{searchTerm}".

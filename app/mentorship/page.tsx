@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Navbar from "@/components/navbar";
 import { auth, db } from "@/lib/firebase";
-import { addDoc, collection, onSnapshot, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, getDocs, serverTimestamp } from "firebase/firestore";
 
 const AREAS = [
   "JEE Prep",
@@ -52,28 +52,25 @@ export default function MentorshipPage() {
   const [filterArea, setFilterArea] = useState("All");
 
   useEffect(() => {
-    const offerUnsub = onSnapshot(collection(db, "mentorshipOffers"), (snapshot) => {
+    const loadMentorship = async () => {
+      const offerSnapshot = await getDocs(collection(db, "mentorshipOffers"));
       setOffers(
-        snapshot.docs.map((docSnapshot) => ({
+        offerSnapshot.docs.map((docSnapshot) => ({
           id: docSnapshot.id,
           ...(docSnapshot.data() as Omit<Offer, "id">),
         })),
       );
-    });
 
-    const requestUnsub = onSnapshot(collection(db, "mentorshipRequests"), (snapshot) => {
+      const requestSnapshot = await getDocs(collection(db, "mentorshipRequests"));
       setRequests(
-        snapshot.docs.map((docSnapshot) => ({
+        requestSnapshot.docs.map((docSnapshot) => ({
           id: docSnapshot.id,
           ...(docSnapshot.data() as Omit<Request, "id">),
         })),
       );
-    });
-
-    return () => {
-      offerUnsub();
-      requestUnsub();
     };
+
+    void loadMentorship();
   }, []);
 
   const visibleOffers = useMemo(() => {

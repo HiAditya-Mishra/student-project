@@ -3,7 +3,7 @@
 import { FormEvent, useMemo, useState, useEffect } from "react";
 import Navbar from "@/components/navbar";
 import { auth, db } from "@/lib/firebase";
-import { addDoc, collection, onSnapshot, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, getDocs, serverTimestamp } from "firebase/firestore";
 
 const COMP_TYPES = ["Hackathon", "Case Competition", "College Fest", "Other"] as const;
 const MODES = ["Online", "Onsite", "Hybrid"] as const;
@@ -39,15 +39,16 @@ export default function HackathonTeamFinderPage() {
   const [typeFilter, setTypeFilter] = useState("All");
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, "teamFinderListings"), (snapshot) => {
+    const loadListings = async () => {
+      const snapshot = await getDocs(collection(db, "teamFinderListings"));
       const nextListings: Listing[] = snapshot.docs.map((docSnapshot) => ({
         id: docSnapshot.id,
         ...(docSnapshot.data() as Omit<Listing, "id">),
       }));
       setListings(nextListings);
-    });
+    };
 
-    return () => unsubscribe();
+    void loadListings();
   }, []);
 
   const filteredListings = useMemo(() => {

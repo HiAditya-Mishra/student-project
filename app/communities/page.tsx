@@ -10,13 +10,15 @@ import {
   collection,
   deleteDoc,
   doc,
-  onSnapshot,
+  getDoc,
+  getDocs,
   orderBy,
   query,
   runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
+  limit,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { normalizeHandle, resolveAvatar } from "@/lib/profile";
@@ -151,13 +153,7 @@ export default function CommunitiesPage() {
   const [inviteToken, setInviteToken] = useState("");
 
   useEffect(() => {
-    let profileUnsub: (() => void) | null = null;
     const authUnsub = onAuthStateChanged(auth, (user) => {
-      if (profileUnsub) {
-        profileUnsub();
-        profileUnsub = null;
-      }
-
       if (!user) {
         setCurrentUserId("");
         setJoined({});
@@ -165,7 +161,8 @@ export default function CommunitiesPage() {
       }
 
       setCurrentUserId(user.uid);
-      profileUnsub = onSnapshot(doc(db, "users", user.uid), (snapshot) => {
+      const loadProfile = async () => {
+        const snapshot = await getDoc(doc(db, "users", user.uid));
         const data = (snapshot.exists() ? snapshot.data() : {}) as UserDocLite;
         const following = data.followingCommunities ?? [];
         const next: Record<string, boolean> = {};
@@ -173,19 +170,19 @@ export default function CommunitiesPage() {
           next[communityId] = true;
         });
         setJoined(next);
-      });
+      };
+      void loadProfile();
     });
 
     return () => {
-      if (profileUnsub) profileUnsub();
       authUnsub();
     };
   }, []);
 
   useEffect(() => {
-    const communitiesUnsub = onSnapshot(
-      collection(db, "communities"),
-      (snapshot) => {
+    const loadCommunities = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, "communities"));
         const remote: Community[] = snapshot.docs.map((docSnapshot) => ({
           id: docSnapshot.id,
           ...(docSnapshot.data() as Omit<Community, "id">),
@@ -211,42 +208,39 @@ export default function CommunitiesPage() {
           });
         });
         setCommunities(Array.from(merged.values()));
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
-      },
-    );
+      }
+    };
 
-    const postsQuery = query(collection(db, "posts"), orderBy("createdAt", "desc"));
-    const postsUnsub = onSnapshot(
-      postsQuery,
-      (snapshot) => {
+    const loadPosts = async () => {
+      try {
+        const postsQuery = query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(200));
+        const snapshot = await getDocs(postsQuery);
         setCommunityError(null);
         const nextPosts: Post[] = snapshot.docs.map((docSnapshot) => ({
           id: docSnapshot.id,
           ...(docSnapshot.data() as Omit<Post, "id">),
         }));
         setPosts(nextPosts);
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
         setCommunityError(
-          error.code === "permission-denied"
+          typeof error === "object" && error && "code" in error && error.code === "permission-denied"
             ? "Community data is blocked by Firestore rules."
             : "Failed to load community posts.",
         );
         setPosts([]);
-      },
-    );
-
-    return () => {
-      communitiesUnsub();
-      postsUnsub();
+      }
     };
+
+    void loadCommunities();
+    void loadPosts();
   }, []);
 
   useEffect(() => {
-    const usersUnsub = onSnapshot(collection(db, "users"), (snapshot) => {
+    const loadUsers = async () => {
+      const snapshot = await getDocs(collection(db, "users"));
       const next: Record<string, UserLite> = {};
       snapshot.docs.forEach((docSnapshot) => {
         const data = docSnapshot.data() as UserDocLite;
@@ -258,9 +252,9 @@ export default function CommunitiesPage() {
         };
       });
       setUsersById(next);
-    });
+    };
 
-    return () => usersUnsub();
+    void loadUsers();
   }, []);
 
   useEffect(() => {
@@ -281,10 +275,10 @@ export default function CommunitiesPage() {
       return;
     }
 
-    const pollsRef = collection(db, "communities", selectedCommunity.id, "polls");
-    const unsubscribe = onSnapshot(
-      pollsRef,
-      (snapshot) => {
+    const loadPolls = async () => {
+      try {
+        const pollsRef = collection(db, "communities", selectedCommunity.id, "polls");
+        const snapshot = await getDocs(pollsRef);
         setPollsError(null);
         setPolls(
           snapshot.docs.map((docSnapshot) => ({
@@ -292,19 +286,18 @@ export default function CommunitiesPage() {
             ...(docSnapshot.data() as Omit<Poll, "id">),
           })),
         );
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
         setPollsError(
-          error.code === "permission-denied"
+          typeof error === "object" && error && "code" in error && error.code === "permission-denied"
             ? "Polls are blocked by Firestore rules."
             : "Failed to load polls.",
         );
         setPolls([]);
-      },
-    );
+      }
+    };
 
-    return () => unsubscribe();
+    void loadPolls();
   }, [selectedCommunity?.id]);
 
   useEffect(() => {
@@ -313,27 +306,26 @@ export default function CommunitiesPage() {
       return;
     }
 
-    const responsesRef = query(
-      collection(db, "communities", selectedCommunity.id, "polls", selectedPollId, "responses"),
-      orderBy("createdAt", "asc"),
-    );
-    const unsubscribe = onSnapshot(
-      responsesRef,
-      (snapshot) => {
+    const loadResponses = async () => {
+      try {
+        const responsesRef = query(
+          collection(db, "communities", selectedCommunity.id, "polls", selectedPollId, "responses"),
+          orderBy("createdAt", "asc"),
+        );
+        const snapshot = await getDocs(responsesRef);
         setPollResponses(
           snapshot.docs.map((docSnapshot) => ({
             id: docSnapshot.id,
             ...(docSnapshot.data() as Omit<PollResponse, "id">),
           })),
         );
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
         setPollResponses([]);
-      },
-    );
+      }
+    };
 
-    return () => unsubscribe();
+    void loadResponses();
   }, [selectedCommunity?.id, selectedPollId]);
 
   useEffect(() => {
@@ -494,24 +486,23 @@ export default function CommunitiesPage() {
       return;
     }
 
-    const commentsQuery = query(collection(db, "posts", expandedPost.id, "comments"), orderBy("createdAt", "asc"));
-    const unsubscribe = onSnapshot(
-      commentsQuery,
-      (snapshot) => {
+    const loadComments = async () => {
+      try {
+        const commentsQuery = query(collection(db, "posts", expandedPost.id, "comments"), orderBy("createdAt", "asc"));
+        const snapshot = await getDocs(commentsQuery);
         setExpandedPostComments(
           snapshot.docs.map((docSnapshot) => ({
             id: docSnapshot.id,
             ...(docSnapshot.data() as Omit<Comment, "id">),
           })),
         );
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
         setExpandedPostComments([]);
-      },
-    );
+      }
+    };
 
-    return () => unsubscribe();
+    void loadComments();
   }, [expandedPost?.id]);
 
   const toggleJoin = async (options?: { communityId?: string; forceInviteAccess?: boolean }) => {

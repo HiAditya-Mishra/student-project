@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, limit, query, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { normalizeHandle, resolveAvatar } from "@/lib/profile";
 import {
@@ -40,9 +40,9 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
   const isCompact = mode === "compact";
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, "users"),
-      (snapshot) => {
+    const loadCandidates = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, "users"));
         const nextCandidates: MentionCandidate[] = snapshot.docs.map((docSnapshot) => {
           const data = docSnapshot.data() as {
             nickname?: string;
@@ -66,20 +66,19 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
         });
 
         setMentionCandidates(nextCandidates.slice(0, 400));
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
         setMentionCandidates([]);
-      },
-    );
+      }
+    };
 
-    return () => unsubscribe();
+    void loadCandidates();
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, "posts"),
-      (snapshot) => {
+    const loadSignals = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, "posts"), limit(300)));
         const nextCandidateCommunities: Record<string, string[]> = {};
         const nextInteractions: Record<string, number> = {};
         const currentUid = auth.currentUser?.uid || "";
@@ -107,46 +106,41 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
 
         setCandidateCommunities(nextCandidateCommunities);
         setInteractionByUser(nextInteractions);
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
         setCandidateCommunities({});
         setInteractionByUser({});
-      },
-    );
+      }
+    };
 
-    return () => unsubscribe();
+    void loadSignals();
   }, []);
 
   useEffect(() => {
-    let profileUnsub: (() => void) | null = null;
     const authUnsub = onAuthStateChanged(auth, (user) => {
-      if (profileUnsub) {
-        profileUnsub();
-        profileUnsub = null;
-      }
       if (!user) {
         setMyCommunities([]);
         return;
       }
-      profileUnsub = onSnapshot(doc(db, "users", user.uid), (snapshot) => {
+      const loadProfile = async () => {
+        const snapshot = await getDoc(doc(db, "users", user.uid));
         const data = snapshot.exists()
           ? snapshot.data() as { followingCommunities?: string[] }
           : {};
         setMyCommunities(Array.isArray(data.followingCommunities) ? data.followingCommunities.slice(0, 30) : []);
-      });
+      };
+      void loadProfile();
     });
 
     return () => {
-      if (profileUnsub) profileUnsub();
       authUnsub();
     };
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, "communities"),
-      (snapshot) => {
+    const loadCommunities = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, "communities"));
         const next = snapshot.docs.map((docSnapshot) => {
           const data = docSnapshot.data() as { name?: string };
           return {
@@ -159,15 +153,14 @@ export default function CreatePost({ mode = "full" }: CreatePostProps) {
           if (prev && next.some((item) => item.id === prev)) return prev;
           return next[0]?.id ?? "";
         });
-      },
-      (error) => {
+      } catch (error) {
         console.error(error);
         setCommunityOptions([]);
         setCommunity("");
-      },
-    );
+      }
+    };
 
-    return () => unsubscribe();
+    void loadCommunities();
   }, []);
 
   const mentionOptions = useMemo(() => {

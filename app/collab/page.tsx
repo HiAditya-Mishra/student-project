@@ -3,7 +3,9 @@
 import { FormEvent, useEffect, useState } from "react";
 import Navbar from "@/components/navbar";
 import { auth, db } from "@/lib/firebase";
-import { addDoc, collection, onSnapshot, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, serverTimestamp, setDoc } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+import { useRouter } from "next/navigation";
 
 type Listing = {
   id: string;
@@ -12,10 +14,12 @@ type Listing = {
   timeline?: string;
   skills?: string[];
   description?: string;
+  authorId?: string;
   authorName?: string;
 };
 
 export default function CollabPage() {
+  const router = useRouter();
   const [listings, setListings] = useState<Listing[]>([]);
   const [title, setTitle] = useState("");
   const [role, setRole] = useState("");
@@ -23,18 +27,84 @@ export default function CollabPage() {
   const [skills, setSkills] = useState("");
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState("");
+  const [publicMode, setPublicMode] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, "collabListings"), (snapshot) => {
+    const loadListings = async () => {
+      const snapshot = await getDocs(collection(db, "collabListings"));
       setListings(
         snapshot.docs.map((docSnapshot) => ({
           id: docSnapshot.id,
           ...(docSnapshot.data() as Omit<Listing, "id">),
         })),
       );
-    });
-    return () => unsubscribe();
+    };
+    void loadListings();
   }, []);
+
+  useEffect(() => {
+    const authUnsub = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        setCurrentUserId("");
+        setPublicMode(true);
+        return;
+      }
+      setCurrentUserId(user.uid);
+      const loadProfile = async () => {
+        const snapshot = await getDoc(doc(db, "users", user.uid));
+        const data = snapshot.exists() ? snapshot.data() as { publicProfile?: boolean } : {};
+        setPublicMode(data.publicProfile ?? true);
+      };
+      void loadProfile();
+    });
+
+    return () => {
+      authUnsub();
+    };
+  }, []);
+
+  const roomIdForPair = (a: string, b: string) => [a, b].sort().join("__");
+
+  const handleRespond = async (listing: Listing) => {
+    const user = auth.currentUser;
+    if (!user) {
+      alert("Please login first.");
+      return;
+    }
+    if (!publicMode) {
+      alert("Messaging is disabled in incognito mode.");
+      return;
+    }
+    if (!listing.authorId || listing.authorId === user.uid) return;
+
+    try {
+      const authorSnapshot = await getDoc(doc(db, "users", listing.authorId));
+      const authorData = authorSnapshot.exists() ? authorSnapshot.data() as { publicProfile?: boolean } : {};
+      if (authorData.publicProfile === false) {
+        alert("This user is in incognito mode and cannot receive messages.");
+        return;
+      }
+
+      const threadId = roomIdForPair(user.uid, listing.authorId);
+      await setDoc(doc(db, "dmThreads", threadId), {
+        participantIds: [user.uid, listing.authorId],
+        requesterId: user.uid,
+        recipientId: listing.authorId,
+        status: "active",
+        origin: "collab",
+        collabListingId: listing.id,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        lastMessage: null,
+      }, { merge: true });
+
+      router.push(`/messages?thread=${threadId}`);
+    } catch (error) {
+      console.error(error);
+      alert("Could not open a direct message.");
+    }
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -96,6 +166,15 @@ export default function CollabPage() {
                     ))}
                   </div>
                   <p className="mt-2 text-sm text-gray-300">{listing.description || ""}</p>
+                  {currentUserId && listing.authorId && listing.authorId !== currentUserId ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleRespond(listing)}
+                      className="mt-3 rounded-lg border border-[#ff6a00] px-3 py-1 text-xs font-semibold text-[#ff8c42] hover:bg-[#1f120a]"
+                    >
+                      Respond in DM
+                    </button>
+                  ) : null}
                 </div>
               ))
             ) : (
