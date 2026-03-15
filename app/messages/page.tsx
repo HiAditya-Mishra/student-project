@@ -1,5 +1,7 @@
 ﻿"use client";
 
+export const dynamic = "force-dynamic";
+
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Navbar from "@/components/navbar";
 import { auth, db } from "@/lib/firebase";
@@ -1035,3 +1037,6 @@ export default function MessagesPage() {
     </div>
   );
 }
+
+
+
