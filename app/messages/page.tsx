@@ -22,7 +22,6 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-import { useSearchParams } from "next/navigation";
 
 type Message = {
   id: string;
@@ -100,7 +99,6 @@ function sharedCommunity(a?: string[], b?: string[]) {
 }
 
 export default function MessagesPage() {
-  const searchParams = useSearchParams();
   const [messages, setMessages] = useState<Message[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [users, setUsers] = useState<Record<string, UserItem>>({});
@@ -253,11 +251,12 @@ export default function MessagesPage() {
   }, [selectedThreadId, readOnlyMode]);
 
   useEffect(() => {
-    const threadParam = searchParams?.get("thread") ?? "";
+    if (typeof window === "undefined") return;
+    const threadParam = new URLSearchParams(window.location.search).get("thread") ?? "";
     if (threadParam) {
       setSelectedThreadId(threadParam);
     }
-  }, [searchParams]);
+  }, []);
 
   const threadsById = useMemo(() => {
     const map: Record<string, Thread> = {};
