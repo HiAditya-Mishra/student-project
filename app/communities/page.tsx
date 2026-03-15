@@ -19,7 +19,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
-import { normalizeHandle } from "@/lib/profile";
+import { normalizeHandle, resolveAvatar } from "@/lib/profile";
 import { useRouter } from "next/navigation";
 
 type PrivacyType = "public" | "private" | "invite";
@@ -55,6 +55,8 @@ type Post = {
   likes?: number;
   authorId?: string;
   author?: string;
+  authorHandle?: string;
+  authorAvatarUrl?: string;
   createdAt?: { seconds?: number };
 };
 
@@ -93,11 +95,14 @@ type UserLite = {
   id: string;
   nickname: string;
   handle: string;
+  avatarUrl?: string;
 };
 
 type UserDocLite = {
   nickname?: string;
   handle?: string;
+  avatarUrl?: string;
+  avatarSeed?: string;
   followingCommunities?: string[];
 };
 
@@ -249,6 +254,7 @@ export default function CommunitiesPage() {
           id: docSnapshot.id,
           nickname: (data.nickname || "Spheera User").trim(),
           handle: normalizeHandle(data.handle || data.nickname || "spheera_user"),
+          avatarUrl: resolveAvatar(data, docSnapshot.id),
         };
       });
       setUsersById(next);
@@ -431,6 +437,21 @@ export default function CommunitiesPage() {
     if (typeof community.onlineCount === "number") return community.onlineCount;
     if (community.onlineMemberIds?.length) return community.onlineMemberIds.length;
     return communityRealtimeStats[community.id]?.onlineCreators.size ?? 0;
+  };
+
+  const formatDateTime = (seconds?: number) => {
+    if (!seconds) return "Just now";
+    return new Date(seconds * 1000).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  };
+
+  const truncateText = (text?: string, limit = 180) => {
+    const normalized = (text || "").trim();
+    if (!normalized) return "";
+    if (normalized.length <= limit) return normalized;
+    return `${normalized.slice(0, limit).trimEnd()}…`;
   };
 
   const memberDirectory = useMemo(() => {
@@ -906,40 +927,58 @@ export default function CommunitiesPage() {
           {tab === "posts" ? (
             <div className="space-y-2">
               {sortedPosts.length ? (
-                sortedPosts.map((post) => (
-                  <div key={post.id} className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="font-semibold">{post.title || "Untitled Post"}</p>
-                        <p className="text-xs text-gray-400">{post.author || "Aspirant"} | {post.likes ?? 0} upvotes</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setExpandedPost(post)}
-                          className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-gray-200 hover:border-[#ff6a00]"
-                        >
-                          Open
-                        </button>
-                        {isAdmin ? (
+                sortedPosts.map((post) => {
+                  const authorProfile = post.authorId ? usersById[post.authorId] : undefined;
+                  const avatarUrl =
+                    post.authorAvatarUrl ||
+                    authorProfile?.avatarUrl ||
+                    resolveAvatar({ avatarSeed: post.authorId || post.author || "user" }, post.authorId || post.author || "user");
+                  const handle = post.authorHandle || authorProfile?.handle || "spheera_user";
+                  const snippet = truncateText(post.content, 180);
+
+                  return (
+                    <div key={post.id} className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2">
+                          <img src={avatarUrl} alt={post.author || "Aspirant"} className="mt-1 h-8 w-8 rounded-full border border-[#ff8c42]" />
+                          <div>
+                            <p className="font-semibold">{post.title || "Untitled Post"}</p>
+                            <p className="text-xs text-gray-400">
+                              {post.author || "Aspirant"} @{handle} | {post.likes ?? 0} upvotes
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
                           <button
-                            onClick={() => void handleDeletePost(post.id)}
-                            className="rounded border border-red-700 px-2 py-1 text-[11px] text-red-300"
+                            onClick={() => setExpandedPost(post)}
+                            className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-gray-200 hover:border-[#ff6a00]"
                           >
-                            Delete
+                            Open
                           </button>
-                        ) : null}
-                        {isAdmin && post.authorId && post.authorId !== currentUserId ? (
-                          <button
-                            onClick={() => void handleBanUser(post.authorId)}
-                            className="rounded border border-yellow-700 px-2 py-1 text-[11px] text-yellow-300"
-                          >
-                            Ban
-                          </button>
-                        ) : null}
+                          {isAdmin ? (
+                            <button
+                              onClick={() => void handleDeletePost(post.id)}
+                              className="rounded border border-red-700 px-2 py-1 text-[11px] text-red-300"
+                            >
+                              Delete
+                            </button>
+                          ) : null}
+                          {isAdmin && post.authorId && post.authorId !== currentUserId ? (
+                            <button
+                              onClick={() => void handleBanUser(post.authorId)}
+                              className="rounded border border-yellow-700 px-2 py-1 text-[11px] text-yellow-300"
+                            >
+                              Ban
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
+                      {snippet ? (
+                        <p className="mt-2 text-sm text-gray-300 whitespace-pre-wrap">{snippet}</p>
+                      ) : null}
                     </div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <p className="rounded-xl border border-[#2f2f2f] bg-[#141414] p-4 text-sm text-gray-500">No posts yet.</p>
               )}
@@ -954,6 +993,9 @@ export default function CommunitiesPage() {
                     <div>
                       <p className="font-semibold">{post.title || "Untitled Post"}</p>
                       <p className="text-xs text-gray-400">{post.likes ?? 0} upvotes</p>
+                      {post.content ? (
+                        <p className="mt-1 text-xs text-gray-300 whitespace-pre-wrap">{truncateText(post.content, 140)}</p>
+                      ) : null}
                     </div>
                     <button
                       onClick={() => setExpandedPost(post)}
@@ -1267,9 +1309,26 @@ export default function CommunitiesPage() {
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4">
           <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-[#2f2f2f] bg-[#141414] p-4">
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-lg font-semibold">{expandedPost.title || "Untitled Post"}</p>
-                <p className="text-xs text-gray-400">{expandedPost.author || "Aspirant"} | {expandedPost.likes ?? 0} upvotes</p>
+              <div className="flex items-start gap-3">
+                {(() => {
+                  const authorProfile = expandedPost.authorId ? usersById[expandedPost.authorId] : undefined;
+                  const avatarUrl =
+                    expandedPost.authorAvatarUrl ||
+                    authorProfile?.avatarUrl ||
+                    resolveAvatar({ avatarSeed: expandedPost.authorId || expandedPost.author || "user" }, expandedPost.authorId || expandedPost.author || "user");
+                  const handle = expandedPost.authorHandle || authorProfile?.handle || "spheera_user";
+                  return (
+                    <>
+                      <img src={avatarUrl} alt={expandedPost.author || "Aspirant"} className="mt-1 h-10 w-10 rounded-full border border-[#ff8c42]" />
+                      <div>
+                        <p className="text-lg font-semibold">{expandedPost.title || "Untitled Post"}</p>
+                        <p className="text-xs text-gray-400">
+                          {expandedPost.author || "Aspirant"} @{handle} | {expandedPost.likes ?? 0} upvotes
+                        </p>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
               <button
                 onClick={() => setExpandedPost(null)}
@@ -1280,6 +1339,7 @@ export default function CommunitiesPage() {
             </div>
 
             <p className="mt-3 whitespace-pre-wrap text-sm text-gray-200">{expandedPost.content || "No content."}</p>
+            <p className="mt-2 text-[11px] text-gray-500">Posted {formatDateTime(expandedPost.createdAt?.seconds)}</p>
             {expandedPost.imageUrl ? (
               <img
                 src={expandedPost.imageUrl}

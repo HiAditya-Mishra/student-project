@@ -37,6 +37,7 @@ interface Post {
   trendingRewarded?: boolean;
   likes: number;
   likedBy?: string[];
+  createdAt?: { seconds?: number };
 }
 
 interface Comment {
@@ -92,6 +93,7 @@ export default function PostFeed({
   const [updatingPostId, setUpdatingPostId] = useState<string | null>(null);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
   const [openComments, setOpenComments] = useState<Record<string, boolean>>({});
+  const [expandedPosts, setExpandedPosts] = useState<Record<string, boolean>>({});
   const [commentsByPost, setCommentsByPost] = useState<Record<string, Comment[]>>({});
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [commentMentionContext, setCommentMentionContext] = useState<Record<string, MentionContext | null>>({});
@@ -496,6 +498,14 @@ export default function PostFeed({
     router.push(`/profile/${uid}`);
   };
 
+  const formatDateTime = (seconds?: number) => {
+    if (!seconds) return "Just now";
+    return new Date(seconds * 1000).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  };
+
   const renderTextWithMentions = (text: string) => {
     const parts = text.split(/(@[a-zA-Z0-9._-]+)/g);
     return parts.map((part, index) => {
@@ -615,224 +625,242 @@ export default function PostFeed({
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
-      {visiblePosts.map((post) => (
-        <article key={post.id} className="rounded-2xl border border-[#ff6a00] bg-[#141414] p-4 shadow-[0_0_14px_rgba(255,106,0,0.2)]">
-          <div className="mb-3 flex items-center gap-2">
-            <img
-              src={post.authorAvatarUrl || authorsById[post.authorId ?? ""]?.avatarUrl || resolveAvatar({ avatarSeed: post.authorId || post.author || "user" }, post.authorId || post.author || "user")}
-              alt={post.author}
-              className="h-8 w-8 rounded-full border border-[#ff8c42]"
-            />
-            <div>
-              <button
-                type="button"
-                onClick={() => openProfile(post.authorId)}
-                className="text-left text-sm font-semibold text-[#ff8c42] hover:underline"
-              >
-                {post.author || "Aspirant"}
-                {post.authorHandle ? <span className="ml-1 text-xs text-gray-400">@{post.authorHandle}</span> : null}
-                <span className="ml-2 rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-[#5bc0ff]">
-                  {post.authorLevelTitle || "Fresher"}
-                </span>
-              </button>
-              {post.authorId && post.authorId !== auth.currentUser?.uid ? (
+      {visiblePosts.map((post) => {
+        const contentText = post.content || "";
+        const isLong = contentText.length > 260;
+        const isExpanded = expandedPosts[post.id];
+        const visibleContent = isLong && !isExpanded ? `${contentText.slice(0, 240).trimEnd()}…` : contentText;
+        const createdAtLabel = formatDateTime(post.createdAt?.seconds);
+
+        return (
+          <article key={post.id} className="rounded-2xl border border-[#ff6a00] bg-[#141414] p-4 shadow-[0_0_14px_rgba(255,106,0,0.2)]">
+            <div className="mb-3 flex items-center gap-2">
+              <img
+                src={post.authorAvatarUrl || authorsById[post.authorId ?? ""]?.avatarUrl || resolveAvatar({ avatarSeed: post.authorId || post.author || "user" }, post.authorId || post.author || "user")}
+                alt={post.author}
+                className="h-8 w-8 rounded-full border border-[#ff8c42]"
+              />
+              <div>
                 <button
                   type="button"
-                  onClick={() => onToggleFollowAuthor?.(post.authorId!)}
-                  className="mt-1 rounded border border-[#2f2f2f] px-2 py-0.5 text-[10px] text-gray-300 hover:border-[#ff6a00]"
+                  onClick={() => openProfile(post.authorId)}
+                  className="text-left text-sm font-semibold text-[#ff8c42] hover:underline"
                 >
-                  {followingUsers.includes(post.authorId) ? "Following" : "Follow"}
+                  {post.author || "Aspirant"}
+                  {post.authorHandle ? <span className="ml-1 text-xs text-gray-400">@{post.authorHandle}</span> : null}
+                  <span className="ml-2 rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-[#5bc0ff]">
+                    {post.authorLevelTitle || "Fresher"}
+                  </span>
                 </button>
-              ) : null}
-              <p className="text-xs text-gray-500">{post.community || "general"}</p>
+                {post.authorId && post.authorId !== auth.currentUser?.uid ? (
+                  <button
+                    type="button"
+                    onClick={() => onToggleFollowAuthor?.(post.authorId!)}
+                    className="mt-1 rounded border border-[#2f2f2f] px-2 py-0.5 text-[10px] text-gray-300 hover:border-[#ff6a00]"
+                  >
+                    {followingUsers.includes(post.authorId) ? "Following" : "Follow"}
+                  </button>
+                ) : null}
+                <p className="text-xs text-gray-500">{post.community || "general"}</p>
+              </div>
             </div>
-          </div>
 
-          <h3 className="text-xl font-semibold leading-tight text-white whitespace-pre-wrap break-words">
-            {renderTextWithMentions(post.title)}
-          </h3>
-          <p className="mt-2 text-sm text-gray-300 whitespace-pre-wrap break-words">{renderTextWithMentions(post.content)}</p>
-          {post.imageUrl ? (
-            <img
-              src={post.imageUrl}
-              alt={post.title || "Post image"}
-              className="mt-3 max-h-[380px] w-full rounded-xl border border-[#2f2f2f] bg-[#0f0f0f] object-cover"
-            />
-          ) : null}
-
-          <div className="mt-4 flex items-center gap-3 text-xs text-gray-300">
-            <button
-              onClick={() => void handleUpvote(post.id)}
-              disabled={
-                readOnly ||
-                updatingPostId === post.id ||
-                (post.likedBy ?? []).includes(auth.currentUser?.uid ?? "")
-              }
-              className="rounded-lg bg-[#ff6a00] px-3 py-1 font-semibold text-white transition hover:bg-[#ff8c42] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {(post.likedBy ?? []).includes(auth.currentUser?.uid ?? "")
-                ? `Upvoted ${post.likes ?? 0}`
-                : `Upvote ${post.likes ?? 0}`}
-            </button>
-            <button
-              onClick={() => toggleComments(post.id)}
-              className="rounded-lg border border-[#2f2f2f] px-3 py-1 hover:border-[#ff6a00]"
-            >
-              Comment {commentsByPost[post.id]?.length ? `(${commentsByPost[post.id].length})` : ""}
-            </button>
-            <button
-              onClick={() => void handleShare(post.id)}
-              disabled={readOnly}
-              className="rounded-lg border border-[#2f2f2f] px-3 py-1 hover:border-[#ff6a00]"
-            >
-              Share
-            </button>
-            {!readOnly && (post.authorId === auth.currentUser?.uid ||
-              (post.authorId == null && post.author === auth.currentUser?.displayName)) ? (
+            <h3 className="text-xl font-semibold leading-tight text-white whitespace-pre-wrap break-words">
+              {renderTextWithMentions(post.title)}
+            </h3>
+            <p className="mt-2 text-sm text-gray-300 whitespace-pre-wrap break-words">{renderTextWithMentions(visibleContent)}</p>
+            {isLong ? (
               <button
-                onClick={() => void handleDeletePost(post)}
-                disabled={deletingPostId === post.id}
-                className="rounded-lg border border-red-800/60 px-3 py-1 text-red-300 hover:border-red-500 disabled:opacity-60"
+                type="button"
+                onClick={() => setExpandedPosts((prev) => ({ ...prev, [post.id]: !prev[post.id] }))}
+                className="mt-2 text-xs font-semibold text-[#ff8c42] hover:underline"
               >
-                {deletingPostId === post.id ? "Deleting..." : "Delete"}
+                {isExpanded ? "Show less" : "Open post"}
               </button>
             ) : null}
-          </div>
+            {post.imageUrl ? (
+              <img
+                src={post.imageUrl}
+                alt={post.title || "Post image"}
+                className="mt-3 max-h-[380px] w-full rounded-xl border border-[#2f2f2f] bg-[#0f0f0f] object-cover"
+              />
+            ) : null}
 
-          {openComments[post.id] ? (
-            <div className="mt-4 space-y-3 rounded-xl border border-[#2a2a2a] bg-[#0f0f0f] p-3">
-              <div className="space-y-2">
-                {(commentsByPost[post.id] ?? []).length ? (
-                  commentsByPost[post.id].map((comment) => (
-                    <div key={comment.id} className="rounded-lg border border-[#222] bg-[#121212] px-3 py-2">
-                      <button
-                        type="button"
-                        onClick={() => openProfile(comment.authorId)}
-                        className="text-xs font-semibold text-[#ff8c42] hover:underline"
-                      >
-                        {comment.author || "Aspirant"}
-                        {comment.authorHandle ? <span className="ml-1 text-[11px] text-gray-400">@{comment.authorHandle}</span> : null}
-                        <span className="ml-2 rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-[#5bc0ff]">
-                          {comment.authorLevelTitle || "Fresher"}
-                        </span>
-                      </button>
-                      <p className="mt-1 text-sm text-gray-300 whitespace-pre-wrap break-words">{renderTextWithMentions(comment.content)}</p>
-                      <div className="mt-2 flex items-center gap-2">
-                        <button
-                          onClick={() => void handleCommentUpvote(post.id, comment.id)}
-                          disabled={
-                            readOnly ||
-                            updatingCommentId === comment.id ||
-                            (comment.likedBy ?? []).includes(auth.currentUser?.uid ?? "")
-                          }
-                          className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-gray-300 hover:border-[#ff6a00] disabled:opacity-60"
-                        >
-                          {(comment.likedBy ?? []).includes(auth.currentUser?.uid ?? "")
-                            ? `Upvoted ${comment.likes ?? 0}`
-                            : `Upvote ${comment.likes ?? 0}`}
-                        </button>
-                        <button
-                          onClick={() => void handleMarkHelpful(post, comment)}
-                          disabled={readOnly || comment.helpful || markingHelpfulCommentId === comment.id}
-                          className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-green-300 hover:border-green-500 disabled:opacity-60"
-                        >
-                          {comment.helpful ? "Helpful" : "Mark Helpful"}
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-xs text-gray-500">No comments yet.</p>
-                )}
-              </div>
-
-              {!readOnly ? (
-                <div className="flex gap-2">
-                  <input
-                    ref={(node) => {
-                      commentInputRefs.current[post.id] = node;
-                    }}
-                    value={commentDrafts[post.id] ?? ""}
-                    onChange={(e) =>
-                      setCommentDraftWithMention(post.id, e.target.value, e.target.selectionStart ?? e.target.value.length)
-                    }
-                    onKeyDown={(e) => {
-                      const options = getCommentMentionOptions(post.id);
-                      const context = commentMentionContext[post.id];
-                      if (context && options.length) {
-                        if (e.key === "ArrowDown") {
-                          e.preventDefault();
-                          setCommentMentionIndex((prev) => ({
-                            ...prev,
-                            [post.id]: ((prev[post.id] ?? 0) + 1) % options.length,
-                          }));
-                          return;
-                        }
-                        if (e.key === "ArrowUp") {
-                          e.preventDefault();
-                          setCommentMentionIndex((prev) => ({
-                            ...prev,
-                            [post.id]: ((prev[post.id] ?? 0) - 1 + options.length) % options.length,
-                          }));
-                          return;
-                        }
-                        if (e.key === "Enter" || e.key === "Tab") {
-                          e.preventDefault();
-                          const selected = options[commentMentionIndex[post.id] ?? 0];
-                          if (selected) applyCommentMention(post.id, selected.handle);
-                          return;
-                        }
-                        if (e.key === "Escape") {
-                          e.preventDefault();
-                          setCommentMentionContext((prev) => ({ ...prev, [post.id]: null }));
-                          return;
-                        }
-                      }
-
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        void submitComment(post.id);
-                      }
-                    }}
-                    placeholder="Write a comment..."
-                    className="flex-1 rounded-lg border border-[#2f2f2f] bg-[#141414] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
-                  />
-                  <button
-                    onClick={() => void submitComment(post.id)}
-                    disabled={submittingCommentPostId === post.id}
-                    className="rounded-lg bg-[#ff6a00] px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                  >
-                    {submittingCommentPostId === post.id ? "Posting..." : "Post"}
-                  </button>
-                </div>
-              ) : (
-                <p className="text-xs text-gray-500">Switch to Public Profile to add or upvote comments.</p>
-              )}
-              {commentMentionContext[post.id] && getCommentMentionOptions(post.id).length ? (
-                <div className="rounded-lg border border-[#2f2f2f] bg-[#121212] p-1">
-                  {getCommentMentionOptions(post.id).map((user, index) => (
-                    <button
-                      key={`${post.id}-${user.id}`}
-                      type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        applyCommentMention(post.id, user.handle);
-                      }}
-                      className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left ${
-                        index === (commentMentionIndex[post.id] ?? 0) ? "bg-[#25160d]" : "hover:bg-[#1c1c1c]"
-                      }`}
-                    >
-                      <img src={user.avatar} alt={user.nickname} className="h-6 w-6 rounded-full border border-[#ff8c42]" />
-                      <span className="text-sm text-white">{user.nickname}</span>
-                      <span className="text-xs text-gray-400">@{user.handle}</span>
-                    </button>
-                  ))}
-                </div>
+            <div className="mt-4 flex items-center gap-3 text-xs text-gray-300">
+              <button
+                onClick={() => void handleUpvote(post.id)}
+                disabled={
+                  readOnly ||
+                  updatingPostId === post.id ||
+                  (post.likedBy ?? []).includes(auth.currentUser?.uid ?? "")
+                }
+                className="rounded-lg bg-[#ff6a00] px-3 py-1 font-semibold text-white transition hover:bg-[#ff8c42] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {(post.likedBy ?? []).includes(auth.currentUser?.uid ?? "")
+                  ? `Upvoted ${post.likes ?? 0}`
+                  : `Upvote ${post.likes ?? 0}`}
+              </button>
+              <button
+                onClick={() => toggleComments(post.id)}
+                className="rounded-lg border border-[#2f2f2f] px-3 py-1 hover:border-[#ff6a00]"
+              >
+                Comment {commentsByPost[post.id]?.length ? `(${commentsByPost[post.id].length})` : ""}
+              </button>
+              <button
+                onClick={() => void handleShare(post.id)}
+                disabled={readOnly}
+                className="rounded-lg border border-[#2f2f2f] px-3 py-1 hover:border-[#ff6a00]"
+              >
+                Share
+              </button>
+              {!readOnly && (post.authorId === auth.currentUser?.uid ||
+                (post.authorId == null && post.author === auth.currentUser?.displayName)) ? (
+                <button
+                  onClick={() => void handleDeletePost(post)}
+                  disabled={deletingPostId === post.id}
+                  className="rounded-lg border border-red-800/60 px-3 py-1 text-red-300 hover:border-red-500 disabled:opacity-60"
+                >
+                  {deletingPostId === post.id ? "Deleting..." : "Delete"}
+                </button>
               ) : null}
             </div>
-          ) : null}
-        </article>
-      ))}
+
+            {openComments[post.id] ? (
+              <div className="mt-4 space-y-3 rounded-xl border border-[#2a2a2a] bg-[#0f0f0f] p-3">
+                <p className="text-[11px] text-gray-500">Posted {createdAtLabel}</p>
+                <div className="space-y-2">
+                  {(commentsByPost[post.id] ?? []).length ? (
+                    commentsByPost[post.id].map((comment) => (
+                      <div key={comment.id} className="rounded-lg border border-[#222] bg-[#121212] px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() => openProfile(comment.authorId)}
+                          className="text-xs font-semibold text-[#ff8c42] hover:underline"
+                        >
+                          {comment.author || "Aspirant"}
+                          {comment.authorHandle ? <span className="ml-1 text-[11px] text-gray-400">@{comment.authorHandle}</span> : null}
+                          <span className="ml-2 rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-[#5bc0ff]">
+                            {comment.authorLevelTitle || "Fresher"}
+                          </span>
+                        </button>
+                        <p className="mt-1 text-sm text-gray-300 whitespace-pre-wrap break-words">{renderTextWithMentions(comment.content)}</p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <button
+                            onClick={() => void handleCommentUpvote(post.id, comment.id)}
+                            disabled={
+                              readOnly ||
+                              updatingCommentId === comment.id ||
+                              (comment.likedBy ?? []).includes(auth.currentUser?.uid ?? "")
+                            }
+                            className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-gray-300 hover:border-[#ff6a00] disabled:opacity-60"
+                          >
+                            {(comment.likedBy ?? []).includes(auth.currentUser?.uid ?? "")
+                              ? `Upvoted ${comment.likes ?? 0}`
+                              : `Upvote ${comment.likes ?? 0}`}
+                          </button>
+                          <button
+                            onClick={() => void handleMarkHelpful(post, comment)}
+                            disabled={readOnly || comment.helpful || markingHelpfulCommentId === comment.id}
+                            className="rounded border border-[#2f2f2f] px-2 py-1 text-[11px] text-green-300 hover:border-green-500 disabled:opacity-60"
+                          >
+                            {comment.helpful ? "Helpful" : "Mark Helpful"}
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-gray-500">No comments yet.</p>
+                  )}
+                </div>
+
+                {!readOnly ? (
+                  <div className="flex gap-2">
+                    <input
+                      ref={(node) => {
+                        commentInputRefs.current[post.id] = node;
+                      }}
+                      value={commentDrafts[post.id] ?? ""}
+                      onChange={(e) =>
+                        setCommentDraftWithMention(post.id, e.target.value, e.target.selectionStart ?? e.target.value.length)
+                      }
+                      onKeyDown={(e) => {
+                        const options = getCommentMentionOptions(post.id);
+                        const context = commentMentionContext[post.id];
+                        if (context && options.length) {
+                          if (e.key === "ArrowDown") {
+                            e.preventDefault();
+                            setCommentMentionIndex((prev) => ({
+                              ...prev,
+                              [post.id]: ((prev[post.id] ?? 0) + 1) % options.length,
+                            }));
+                            return;
+                          }
+                          if (e.key === "ArrowUp") {
+                            e.preventDefault();
+                            setCommentMentionIndex((prev) => ({
+                              ...prev,
+                              [post.id]: ((prev[post.id] ?? 0) - 1 + options.length) % options.length,
+                            }));
+                            return;
+                          }
+                          if (e.key === "Enter" || e.key === "Tab") {
+                            e.preventDefault();
+                            const selected = options[commentMentionIndex[post.id] ?? 0];
+                            if (selected) applyCommentMention(post.id, selected.handle);
+                            return;
+                          }
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            setCommentMentionContext((prev) => ({ ...prev, [post.id]: null }));
+                            return;
+                          }
+                        }
+
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          void submitComment(post.id);
+                        }
+                      }}
+                      placeholder="Write a comment..."
+                      className="flex-1 rounded-lg border border-[#2f2f2f] bg-[#141414] px-3 py-2 text-sm outline-none focus:border-[#ff6a00]"
+                    />
+                    <button
+                      onClick={() => void submitComment(post.id)}
+                      disabled={submittingCommentPostId === post.id}
+                      className="rounded-lg bg-[#ff6a00] px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                    >
+                      {submittingCommentPostId === post.id ? "Posting..." : "Post"}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500">Switch to Public Profile to add or upvote comments.</p>
+                )}
+                {commentMentionContext[post.id] && getCommentMentionOptions(post.id).length ? (
+                  <div className="rounded-lg border border-[#2f2f2f] bg-[#121212] p-1">
+                    {getCommentMentionOptions(post.id).map((user, index) => (
+                      <button
+                        key={`${post.id}-${user.id}`}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          applyCommentMention(post.id, user.handle);
+                        }}
+                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left ${
+                          index === (commentMentionIndex[post.id] ?? 0) ? "bg-[#25160d]" : "hover:bg-[#1c1c1c]"
+                        }`}
+                      >
+                        <img src={user.avatar} alt={user.nickname} className="h-6 w-6 rounded-full border border-[#ff8c42]" />
+                        <span className="text-sm text-white">{user.nickname}</span>
+                        <span className="text-xs text-gray-400">@{user.handle}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </article>
+        );
+      })}
       </div>
       {!feedError && !visiblePosts.length ? (
         <p className="rounded-xl border border-[#2b2b2b] bg-[#121212] p-3 text-sm text-gray-400">
