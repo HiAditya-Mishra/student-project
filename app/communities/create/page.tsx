@@ -183,16 +183,14 @@ export default function CreateCommunityPage() {
         { merge: true },
       );
 
-      memberIds.forEach((memberId) => {
-        batch.set(
-          doc(db, "users", memberId),
-          {
-            followingCommunities: arrayUnion(communityId),
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true },
-        );
-      });
+      // The creator of the community automatically follows it.
+      // Other members are just added to the member list and can join later,
+      // which will add it to their own `followingCommunities` list.
+      batch.set(
+        doc(db, "users", user.uid),
+        { followingCommunities: arrayUnion(communityId), updatedAt: serverTimestamp() },
+        { merge: true },
+      );
 
       await batch.commit();
       router.push(`/communities?created=${encodeURIComponent(communityId)}`);
@@ -357,5 +355,3 @@ export default function CreateCommunityPage() {
     </div>
   );
 }
-
-
